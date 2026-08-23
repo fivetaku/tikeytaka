@@ -64,7 +64,7 @@ APIキー中央ボールトプラグイン — 散らばった `.env` のキー�
 | `/tikeytaka:add` | 新しいキーをチャット露出なしで登録 |
 | `/tikeytaka:list` | 管理中サービス・プロジェクト接続状況 |
 | `/tikeytaka:sync` | ボールト → 接続された全 .env へ伝播 |
-| `/tikeytaka:verify` | Live-check keys before/after registration — dead keys never enter the vault |
+| `/tikeytaka:verify` | 登録前後にキーの生死を実測 — 死んだキーはボールトに入らない |
 
 ## 新しいデバイスの接続
 
