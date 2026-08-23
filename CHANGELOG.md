@@ -1,5 +1,10 @@
 # Changelog
 
+
+## 0.2.2 — 2026-08-24
+
+- **Fix: first-run setup could wipe `settings.json`** — if the file was corrupted or contained comments (JSONC), the shared update-notifier installer re-wrote it as an empty object plus the hook, silently destroying all user settings. It now refuses to write when parsing fails and writes atomically (tmp + rename). Marketplace-wide propagation of the fix found in the ddiring v0.1.1 external review; reproduction-verified.
+
 ## 0.2.1 — 2026-08-23
 
 - Fix: `init` wrote an empty `vault.path` (shell self-referential redirect — the redirection created the empty file before `vault_dir` read it back), which made every later command resolve the vault to `/secrets.enc`. Path is now computed into a variable before writing, and empty `vault.path` files are ignored on read. Caught in the first real-environment run right after v0.2.0.
