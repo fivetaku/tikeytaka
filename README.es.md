@@ -64,6 +64,7 @@ Por la nube solo circula texto cifrado; la llave para abrirlo nunca sale de tus 
 | `/tikeytaka:add` | Registra una clave nueva sin exposición en el chat |
 | `/tikeytaka:list` | Servicios gestionados y conexiones de proyectos |
 | `/tikeytaka:sync` | Propaga la bóveda a cada `.env` conectado |
+| `/tikeytaka:verify` | Live-check keys before/after registration — dead keys never enter the vault |
 
 ## Conectar un dispositivo nuevo
 

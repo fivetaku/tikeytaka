@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 — 2026-08-24
+
+- New **verify skill**: live-checks keys against no-cost official endpoints before they enter the vault (dead keys are never registered) and on demand for the whole vault. Ships probe recipes for Gemini/OpenAI/Anthropic/OpenRouter/Perplexity/Telegram/data.go.kr/DashScope plus HTTP-code interpretation rules (401=dead, 403=valid-but-unentitled, 000=retry without proxy) and two real misjudgment traps (proxy-blocked 000, `$(command)` reference values in rc files). Unknown providers get their probe designed from official docs via the docs-guide skill (web-search fallback).
+- add/scan now require the verify pass before `set-stdin`; commands router and READMEs updated.
+
 ## 0.2.3 — 2026-08-24
 
 - scan skill now also sweeps shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, `~/.bash_profile`) for plaintext `export *_KEY/*_TOKEN/*_SECRET=` lines — a classic leak path the `.env`-only sweep missed (real case: a dead Perplexity key sat in `.zshrc` untouched by the first scan). Keys found in rc files are vaulted and the rc line is removed, not propagated.
