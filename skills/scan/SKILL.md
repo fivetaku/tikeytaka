@@ -10,6 +10,7 @@ description: 기존 프로젝트들의 .env 파일을 탐색해 API 키를 중�
 ## 절차
 
 1. **탐색**: 홈 디렉토리에서 `.env`/`.env.local` 파일을 찾는다. `node_modules`, `Library`, `.Trash`, 백업/Downloads류는 제외한다.
+   **shell rc 파일도 반드시 포함**: `~/.zshrc`, `~/.zprofile`, `~/.bashrc`, `~/.bash_profile`에서 `export *_KEY/*_TOKEN/*_SECRET=` 평문 노출을 찾는다 — rc 파일은 키 유출의 고전 경로인데 .env만 보면 놓친다(2026-08-24 실사례: 죽은 Perplexity 키가 .zshrc에 잔존). rc에서 발견한 키는 볼트 등록 후 rc에서 라인 삭제를 권한다(rc는 전파 대상이 아니라 제거 대상 — 전 셸에 상시 노출되므로).
 
 2. **인벤토리**: 각 파일의 변수 이름만(값 제외) 추출해 보여준다. **키 값은 절대 채팅에 출력하지 않는다** — 값 비교가 필요하면 sha256 앞 8자리 지문으로만 다룬다.
 

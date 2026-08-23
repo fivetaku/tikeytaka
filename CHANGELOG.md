@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-08-24
+
+- scan skill now also sweeps shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, `~/.bash_profile`) for plaintext `export *_KEY/*_TOKEN/*_SECRET=` lines — a classic leak path the `.env`-only sweep missed (real case: a dead Perplexity key sat in `.zshrc` untouched by the first scan). Keys found in rc files are vaulted and the rc line is removed, not propagated.
+
 
 ## 0.2.2 — 2026-08-24
 
