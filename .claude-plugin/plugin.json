@@ -1,6 +1,6 @@
 {
   "name": "tikeytaka",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "API key central vault — scan .env files into an encrypted cloud-synced vault, register keys without chat exposure, auto-wire them when tasks need keys, propagate everywhere. /tikeytaka:use, :scan, :add, :list, :sync",
   "author": {
     "name": "chulrolee",
@@ -9,5 +9,12 @@
   "homepage": "https://github.com/fivetaku/tikeytaka",
   "repository": "https://github.com/fivetaku/tikeytaka",
   "license": "MIT",
-  "keywords": ["api-key", "secrets", "vault", "env", "keychain", "security"]
+  "keywords": [
+    "api-key",
+    "secrets",
+    "vault",
+    "env",
+    "keychain",
+    "security"
+  ]
 }

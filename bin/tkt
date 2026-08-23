@@ -69,13 +69,14 @@ detect_cloud_dir() {
 }
 vault_dir() {
   if [ -n "${TIKEYTAKA_DIR:-}" ]; then echo "$TIKEYTAKA_DIR"; return; fi   # 명시적 override
-  if [ -f "$VAULT_PATH_FILE" ]; then cat "$VAULT_PATH_FILE"; return; fi     # 고정된 경로
+  if [ -s "$VAULT_PATH_FILE" ]; then cat "$VAULT_PATH_FILE"; return; fi     # 고정된 경로 (빈 파일은 무시)
   detect_cloud_dir
 }
 pin_vault_dir() {  # init에서만 호출 — 경로 확정
   [ -n "${TIKEYTAKA_DIR:-}" ] && return 0
-  [ -f "$VAULT_PATH_FILE" ] && return 0
-  vault_dir > "$VAULT_PATH_FILE"
+  [ -s "$VAULT_PATH_FILE" ] && return 0
+  local d; d="$(detect_cloud_dir)"   # 변수로 먼저 확정 — `vault_dir > file`은 리다이렉션이 빈 파일을 먼저 만들어 자기참조로 빈 값을 쓴다
+  printf '%s\n' "$d" > "$VAULT_PATH_FILE"
 }
 VAULT="$(vault_dir)/secrets.enc"
 

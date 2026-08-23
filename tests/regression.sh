@@ -101,6 +101,16 @@ TKT_PASSPHRASE_FILE="$WORK/pass3" bash "$TKT" init </dev/null >/dev/null 2>&1; R
 check "틀린 저장 암호 init → '이미 셋업됨' 미출력(TTY 재입력 요구/실패)" '[ "$RC" != "0" ]'
 check "init 실패 후 저장 암호 불변" '[ "$(cat "$WORK/pass3")" = "WRONG" ]'
 
+echo "# 10. vault.path 경로 고정 (TIKEYTAKA_DIR 없이 — v0.2.0 자기참조 빈 파일 버그 회귀)"
+FAKEHOME="$WORK/home"; mkdir -p "$FAKEHOME"
+printf 'pin-pass' > "$WORK/pass4"; chmod 600 "$WORK/pass4"
+env -u TIKEYTAKA_DIR HOME="$FAKEHOME" TKT_PASSPHRASE_FILE="$WORK/pass4" bash "$TKT" init </dev/null >/dev/null 2>&1
+check "vault.path가 비어있지 않음" '[ -s "$FAKEHOME/.config/tikeytaka/vault.path" ]'
+check "vault.path가 절대경로" 'grep -q "^/" "$FAKEHOME/.config/tikeytaka/vault.path"'
+W_OUT="$(env -u TIKEYTAKA_DIR HOME="$FAKEHOME" TKT_PASSPHRASE_FILE="$WORK/pass4" bash "$TKT" where)"
+check "where가 고정 경로의 secrets.enc를 가리킴" 'echo "$W_OUT" | grep -q "^볼트: $FAKEHOME/.tikeytaka/secrets.enc$"'
+check "재실행 시 볼트 인식(빈 경로 회귀 방지)" 'env -u TIKEYTAKA_DIR HOME="$FAKEHOME" TKT_PASSPHRASE_FILE="$WORK/pass4" bash "$TKT" list >/dev/null 2>&1'
+
 echo
 echo "결과: $PASS_N passed, $FAIL_N failed"
 rm -rf "$WORK"

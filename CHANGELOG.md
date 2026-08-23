@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-08-23
+
+- Fix: `init` wrote an empty `vault.path` (shell self-referential redirect — the redirection created the empty file before `vault_dir` read it back), which made every later command resolve the vault to `/secrets.enc`. Path is now computed into a variable before writing, and empty `vault.path` files are ignored on read. Caught in the first real-environment run right after v0.2.0.
+- Regression suite now covers the `vault.path` pinning path without `TIKEYTAKA_DIR` (35 cases).
+
 ## 0.2.0 — 2026-08-23
 
 - **Vault engine rewritten (TKT2)** after an internal audit + GPT-5.6 Sol (Pro) review found the v0.1.0 streaming pipeline could overwrite the vault with empty content on a corrupted/half-synced file or a malformed service name. Writes are now transactional: decrypt → integrity-verify → edit → re-encrypt → round-trip compare → conflict check → keep a `.bak` generation → atomic rename. The original vault is never touched until every step succeeds.
