@@ -15,6 +15,7 @@
 #   tkt map-list              연결 목록
 #   tkt sync [--check]        볼트 → 연결된 모든 .env 전파 (--check는 드라이런)
 #   tkt where                 볼트/매핑 파일 위치 출력
+#   tkt doctor                셀프 진단 (암호 저장소·볼트 접근·복호화·매핑 단계별 판정)
 set -euo pipefail
 umask 077
 
@@ -119,12 +120,36 @@ pass_set() {
   echo "주의: 볼트 암호를 $CONF_DIR/passphrase (0600) 파일에 저장했습니다. OS 비밀 저장소보다 약합니다." >&2
 }
 load_pass() {
-  PASS="$(pass_get)" && [ -n "$PASS" ] || die "볼트 암호 미등록 — 'tkt init' 먼저 실행하세요."
+  PASS="$(pass_get)" && [ -n "$PASS" ] || die "볼트 암호 취득 실패($(pass_source)) — 미등록이면 'tkt init', 등록돼 있다면 이 프로세스 컨텍스트에서 비밀 저장소 접근이 막힌 것. 'tkt doctor'로 진단하세요."
+}
+pass_source() {  # 진단용 — pass_get이 실제로 시도할 소스 이름
+  if [ -n "${TKT_PASSPHRASE_FILE:-}" ]; then echo "TKT_PASSPHRASE_FILE=$TKT_PASSPHRASE_FILE"
+  elif command -v security >/dev/null 2>&1; then echo "맥 키체인 tikeytaka-passphrase"
+  elif command -v secret-tool >/dev/null 2>&1; then echo "secret-tool service=tikeytaka"
+  elif command -v powershell.exe >/dev/null 2>&1; then echo "Windows DPAPI $CONF_DIR/passphrase.dpapi"
+  else echo "평문 파일 $CONF_DIR/passphrase"; fi
 }
 
 # ---------- 암복호화 (파일 단위 — 스트리밍 파이프라인 금지, 암호는 stdin 전달) ----------
-enc_file() { printf '%s\n' "$PASS" | openssl enc "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>/dev/null; }
-dec_file() { printf '%s\n' "$PASS" | openssl enc -d "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>/dev/null; }
+# stderr는 OSSL_ERR에 보관 — "암호 불일치"와 "파일 접근 불가"를 구분해 보고하기 위함
+# (2026-08-31 실측: 샌드박스·TCC로 iCloud 볼트를 못 읽는 실패까지 전부 "암호 불일치"로 오보되어 세션마다 오진 반복)
+OSSL_ERR=""
+enc_file() { OSSL_ERR="$(printf '%s\n' "$PASS" | openssl enc "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>&1)"; }
+dec_file() { OSSL_ERR="$(printf '%s\n' "$PASS" | openssl enc -d "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>&1)"; }
+
+# 복호화 이전에 접근 실패를 원인별로 진단. 파일 부재 판정은 호출부 몫.
+vault_preflight() {
+  [ -f "$VAULT" ] || return 0
+  if ! head -c 8 "$VAULT" >/dev/null 2>&1; then
+    # iCloud 미실체화(dataless) 가능 — 강제 다운로드 후 최대 10초 대기
+    if command -v brctl >/dev/null 2>&1; then
+      brctl download "$VAULT" 2>/dev/null || true
+      local i=0; while [ "$i" -lt 10 ] && ! head -c 8 "$VAULT" >/dev/null 2>&1; do sleep 1; i=$((i+1)); done
+    fi
+    head -c 8 "$VAULT" >/dev/null 2>&1 || die "볼트 파일을 읽을 수 없음(암호 문제 아님): $VAULT — 이 프로세스가 클라우드 폴더 접근 권한이 없거나(샌드박스·TCC) iCloud 동기화 미완료. 일반 터미널에서 재시도하거나 'tkt doctor'로 진단하세요."
+  fi
+  [ "$(head -c 8 "$VAULT" 2>/dev/null)" = "Salted__" ] || die "볼트 파일이 openssl 암호문이 아님(Salted__ 매직 부재): $VAULT — iCloud 충돌 사본/절단 파일 의심. 'tkt doctor'로 진단하세요."
+}
 
 # ---------- TKT2 평문 포맷: #TKT2 / #SHA256:<본문해시> / TSV 본문 ----------
 write_plain() { { echo "#TKT2"; echo "#SHA256:$(sha256 < "$1")"; cat "$1"; } > "$2"; }
@@ -137,7 +162,8 @@ validate_plain() {
   return 0
 }
 vault_read_to() {  # $1: 평문 out. 실패 시 원본 무손상 중단.
-  dec_file "$VAULT" "$1" || die "볼트 복호화 실패 — 암호 불일치 또는 파일 손상. 원본($VAULT)은 변경되지 않았습니다."
+  vault_preflight
+  dec_file "$VAULT" "$1" || die "볼트 복호화 실패 — 파일은 읽혔으므로 암호 불일치 가능성이 큼 [$(openssl version 2>/dev/null): ${OSSL_ERR%%$'\n'*}]. 원본($VAULT)은 변경되지 않았습니다. 'tkt doctor'로 진단하세요."
   validate_plain "$1" || die "볼트 무결성 검증 실패(TKT2 포맷/해시 불일치) — 동기화 미완료·손상 가능. 원본은 변경되지 않았습니다."
 }
 vault_body_to() { local p; p="$(mktmp)"; vault_read_to "$p"; tail -n +3 "$p" > "$1"; }
@@ -146,9 +172,9 @@ vault_commit() {  # $1: 새 body 파일, $2: 편집 시작 시점의 암호문 �
   dir="$(dirname "$VAULT")"; mkdir -p "$dir"
   plain="$(mktmp)"; write_plain "$1" "$plain"
   cipher="$(mktmp "$dir")"
-  enc_file "$plain" "$cipher" || die "암호화 실패"
+  enc_file "$plain" "$cipher" || die "암호화 실패 [${OSSL_ERR%%$'\n'*}]"
   verify="$(mktmp)"
-  dec_file "$cipher" "$verify" || die "자가검증 복호화 실패 — 커밋 중단"
+  dec_file "$cipher" "$verify" || die "자가검증 복호화 실패 — 커밋 중단 [${OSSL_ERR%%$'\n'*}]"
   cmp -s "$plain" "$verify" || die "라운드트립 검증 실패 — 커밋 중단"
   if [ -f "$VAULT" ]; then
     [ -n "$2" ] || die "내부 오류: 기존 볼트가 있는데 원본 해시가 없음"
@@ -320,6 +346,53 @@ case "$cmd" in
     echo "볼트: $VAULT"
     [ -f "$VAULT_PATH_FILE" ] && echo "경로 고정: $(cat "$VAULT_PATH_FILE")" || echo "경로 고정: (아직 — init에서 확정)"
     echo "매핑: $MAP" ;;
+  doctor)
+    # 각 실패 지점을 단계별로 분리 판정 — "볼트 안 열림"의 원인을 한 번에 특정한다.
+    FAILED=0
+    echo "== tkt doctor =="
+    echo "openssl : $(command -v openssl || echo 없음) — $(openssl version 2>/dev/null || echo 실행불가)"
+    if PASS="$(pass_get)" && [ -n "$PASS" ]; then
+      echo "ok   암호 취득 (${#PASS}자, 출처: $(pass_source))"
+    else
+      FAILED=1; echo "FAIL 암호 취득 (시도한 출처: $(pass_source))"
+      echo "  → 키체인이라면 이 프로세스 컨텍스트에서 security 접근이 막혔을 수 있음 — 일반 터미널에서 재시도. 자동화 경로는 TKT_PASSPHRASE_FILE 폴백 사용."
+    fi
+    echo "볼트    : $VAULT"
+    if [ ! -f "$VAULT" ]; then
+      FAILED=1
+      VDIR="$(dirname "$VAULT")"
+      if ls "$VDIR" >/dev/null 2>&1; then
+        echo "FAIL 볼트 파일 없음 (폴더는 접근 가능) — 이 기기에서 'tkt init' 미실행이거나 경로가 다름"
+      elif ls "$(dirname "$VDIR")" >/dev/null 2>&1; then
+        echo "FAIL 볼트 폴더 미생성: $VDIR — 'tkt init' 미실행이거나 vault.path/TIKEYTAKA_DIR 경로가 다름"
+      else
+        echo "FAIL 볼트 폴더 접근 불가: $VDIR — 샌드박스·TCC·iCloud 권한 문제 (파일이 없는 게 아닐 수 있음)"
+        echo "  → 일반 터미널에서 재시도. iCloud 미실체화면: brctl download \"$VAULT\""
+      fi
+    elif ! head -c 8 "$VAULT" >/dev/null 2>&1; then
+      FAILED=1; echo "FAIL 볼트 존재하나 읽기 불가 — 권한(TCC·샌드박스) 또는 iCloud 미실체화(dataless)"
+      echo "  → brctl download \"$VAULT\" 후 재시도"
+    elif [ "$(head -c 8 "$VAULT" 2>/dev/null)" != "Salted__" ]; then
+      FAILED=1; echo "FAIL 볼트 매직 불일치(openssl 암호문 아님) — iCloud 충돌 사본/절단 파일 의심"
+    else
+      echo "ok   볼트 읽기 + Salted__ 매직 ($(wc -c < "$VAULT" | tr -d ' ')바이트, mtime $(stat -f %Sm "$VAULT" 2>/dev/null || stat -c %y "$VAULT" 2>/dev/null))"
+    fi
+    if [ "$FAILED" = 0 ]; then
+      tmp="$(mktmp)"
+      if dec_file "$VAULT" "$tmp"; then
+        if validate_plain "$tmp"; then
+          echo "ok   복호화 + TKT2 무결성 (키 $(tail -n +3 "$tmp" | grep -c . | tr -d ' ')개)"
+        else
+          FAILED=1; echo "FAIL 복호화는 성공, TKT2 무결성 실패 — 동기화 미완료/손상. 다른 기기 동기화 완료 후 재시도"
+        fi
+      else
+        FAILED=1; echo "FAIL 복호화 실패 — 파일은 읽혔으므로 암호 불일치 가능성이 큼 [${OSSL_ERR%%$'\n'*}]"
+      fi
+    else
+      echo "skip 복호화 테스트 (앞 단계 실패)"
+    fi
+    if [ -f "$MAP" ] && [ -s "$MAP" ]; then echo "ok   매핑 $(grep -c . "$MAP" | tr -d ' ')건 ($MAP)"; else echo "     매핑 없음 ($MAP)"; fi
+    if [ "$FAILED" = 0 ]; then echo "== 모두 정상 =="; else echo "== 문제 발견 — 위 FAIL 항목의 안내를 따르세요 =="; exit 1; fi ;;
   *)
-    grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,17p' ;;
+    grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,18p' ;;
 esac

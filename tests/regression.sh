@@ -111,6 +111,26 @@ W_OUT="$(env -u TIKEYTAKA_DIR HOME="$FAKEHOME" TKT_PASSPHRASE_FILE="$WORK/pass4"
 check "where가 고정 경로의 secrets.enc를 가리킴" 'echo "$W_OUT" | grep -q "^볼트: $FAKEHOME/.tikeytaka/secrets.enc$"'
 check "재실행 시 볼트 인식(빈 경로 회귀 방지)" 'env -u TIKEYTAKA_DIR HOME="$FAKEHOME" TKT_PASSPHRASE_FILE="$WORK/pass4" bash "$TKT" list >/dev/null 2>&1'
 
+echo "# 11. 실패 원인 구분 보고 + doctor (v0.4.0 — 접근불가·손상·암호불일치 오진 방지)"
+export TIKEYTAKA_DIR="$WORK/vault3"
+printf 'doc-pass' > "$WORK/pass5"; chmod 600 "$WORK/pass5"
+export TKT_PASSPHRASE_FILE="$WORK/pass5"
+bash "$TKT" set svc-doc DOCVAL1 >/dev/null 2>&1
+check "doctor 정상 상태 exit 0" 'bash "$TKT" doctor >/dev/null 2>&1'
+ERR_PERM="$(chmod 000 "$TIKEYTAKA_DIR/secrets.enc"; bash "$TKT" get svc-doc 2>&1 >/dev/null; chmod 600 "$TIKEYTAKA_DIR/secrets.enc")"
+check "읽기불가 볼트 → '읽을 수 없음' 보고" 'echo "$ERR_PERM" | grep -q "읽을 수 없음"'
+check "읽기불가 볼트 → '암호 불일치'로 오보하지 않음" '! echo "$ERR_PERM" | grep -q "암호 불일치"'
+cp "$TIKEYTAKA_DIR/secrets.enc" "$WORK/doc.good"
+echo "GARBAGE-NOT-CIPHER" > "$TIKEYTAKA_DIR/secrets.enc"
+ERR_MAGIC="$(bash "$TKT" get svc-doc 2>&1 >/dev/null)"
+check "매직 없는 볼트 → '암호문이 아님' 보고" 'echo "$ERR_MAGIC" | grep -q "암호문이 아님"'
+check "매직 없는 볼트 doctor exit!=0" '! bash "$TKT" doctor >/dev/null 2>&1'
+cp "$WORK/doc.good" "$TIKEYTAKA_DIR/secrets.enc"
+printf 'WRONG-doc' > "$WORK/pass6"; chmod 600 "$WORK/pass6"
+ERR_PASSMM="$(TKT_PASSPHRASE_FILE="$WORK/pass6" bash "$TKT" get svc-doc 2>&1 >/dev/null)"
+check "틀린 암호 → '암호 불일치' 보고" 'echo "$ERR_PASSMM" | grep -q "암호 불일치"'
+check "help에 doctor 노출" 'bash "$TKT" help 2>/dev/null | grep -q "tkt doctor"'
+
 echo
 echo "결과: $PASS_N passed, $FAIL_N failed"
 rm -rf "$WORK"
