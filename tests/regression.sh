@@ -131,6 +131,33 @@ ERR_PASSMM="$(TKT_PASSPHRASE_FILE="$WORK/pass6" bash "$TKT" get svc-doc 2>&1 >/d
 check "틀린 암호 → '암호 불일치' 보고" 'echo "$ERR_PASSMM" | grep -q "암호 불일치"'
 check "help에 doctor 노출" 'bash "$TKT" help 2>/dev/null | grep -q "tkt doctor"'
 
+echo "# 12. requires — 플러그인 keys.json 선언 대조 (v0.5.0)"
+PLUGDIR="$WORK/plugs"; mkdir -p "$PLUGDIR/p-one" "$PLUGDIR/p-two" "$PLUGDIR/p-none"
+cat > "$PLUGDIR/p-one/keys.json" <<'JSON'
+{"keys":[{"service":"svc-doc","env":"SVC_DOC_KEY","required":true,"docs":"https://example.com/doc"},
+         {"service":"absent-required","env":"ABSENT_KEY","required":true,"docs":"https://example.com/get"}]}
+JSON
+cat > "$PLUGDIR/p-two/keys.json" <<'JSON'
+{"keys":[{"service":"absent-optional","required":false}]}
+JSON
+REQ_OUT="$(bash "$TKT" requires "$PLUGDIR/p-one" "$PLUGDIR/p-two" "$PLUGDIR/p-none" 2>&1)"; REQ_RC=$?
+check "등록된 키를 ok로 보고" 'echo "$REQ_OUT" | grep -q "^ok   p-one :: svc-doc → SVC_DOC_KEY$"'
+check "미등록 필수 키를 MISSING + 발급링크로 보고" 'echo "$REQ_OUT" | grep -q "MISSING p-one :: absent-required → ABSENT_KEY  (발급: https://example.com/get)"'
+check "미등록 선택 키는 opt로 분리 보고" 'echo "$REQ_OUT" | grep -q "^opt  p-two :: absent-optional 미등록 (선택 항목)"'
+check "필수 미등록 시 exit 4" '[ "$REQ_RC" = "4" ]'
+check "집계 라인 정확(3건/1건/1건)" 'echo "$REQ_OUT" | grep -q "선언 3건, 필수 미등록 1건, 선택 미등록 1건"'
+REQ_OK="$(bash "$TKT" requires "$PLUGDIR/p-none" 2>&1)"; REQ_OK_RC=$?
+check "선언 없는 경로만 주면 exit 0" '[ "$REQ_OK_RC" = "0" ]'
+check "선언 없음 안내 출력" 'echo "$REQ_OK" | grep -q "keys.json 선언을 가진 플러그인이 없습니다"'
+echo '{"keys":[{"env":"NO_SERVICE"}]}' > "$PLUGDIR/p-none/keys.json"
+bash "$TKT" requires "$PLUGDIR/p-none" >/dev/null 2>&1; RC=$?
+check "service 누락 keys.json은 실패(조용히 무시 금지)" '[ "$RC" != "0" ]'
+printf 'NOT-JSON{' > "$PLUGDIR/p-none/keys.json"
+bash "$TKT" requires "$PLUGDIR/p-none" >/dev/null 2>&1; RC=$?
+check "깨진 JSON은 실패로 보고" '[ "$RC" != "0" ]'
+check "requires는 볼트를 수정하지 않음" '[ "$(bash "$TKT" get svc-doc)" = "DOCVAL1" ]'
+check "help에 requires 노출" 'bash "$TKT" help 2>/dev/null | grep -q "tkt requires"'
+
 echo
 echo "결과: $PASS_N passed, $FAIL_N failed"
 rm -rf "$WORK"

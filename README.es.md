@@ -65,6 +65,7 @@ Por la nube solo circula texto cifrado; la llave para abrirlo nunca sale de tus 
 | `/tikeytaka:list` | Servicios gestionados y conexiones de proyectos |
 | `/tikeytaka:sync` | Propaga la bóveda a cada `.env` conectado |
 | `/tikeytaka:verify` | Comprueba las claves en vivo antes/después de registrar — las claves muertas nunca entran en la bóveda |
+| `/tikeytaka:requires` | Compara el `keys.json` declarado por un plugin con la bóveda — detecta claves faltantes antes de usarlas |
 
 ## Conectar un dispositivo nuevo
 

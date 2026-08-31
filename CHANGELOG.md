@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-09-01
+
+- **New `tkt requires`**: plugins declare the API keys they need in a `keys.json` at their root; `requires` scans installed plugins (marketplace clones + cache, or explicit paths) and diffs those declarations against the vault. Reports `ok` / `MISSING` (required, exit 4, with the issuing URL) / `opt` (optional, no exit impact). Read-only — never registers keys or touches `.env`. Removes the manual "which keys does this plugin need again?" step. New **requires skill** documents the `keys.json` schema; declarations live beside `plugin.json`, never inside it (unknown keys there fail `claude plugin validate`).
+- Implementation note: `IFS=$'\t' read` collapses consecutive tabs because tab is IFS whitespace, so an omitted optional field shifted every later field. Optional fields are emitted with a `-` sentinel and restored in bash.
+- Regression suite: 53 cases (11 new — declaration diffing, exit codes, malformed/incomplete `keys.json`, read-only guarantee).
+
 ## 0.4.0 — 2026-08-31
 
 - **New `tkt doctor`**: staged self-diagnosis (passphrase source → vault folder/file reachability → `Salted__` magic → decrypt + TKT2 integrity → mappings) with per-stage FAIL guidance and exit code. Motivated by a real misdiagnosis loop: sandbox/TCC denial of the iCloud vault folder was reported as "passphrase mismatch", sending two sessions down a wrong "LibreSSL vs OpenSSL 3 KDF difference" theory (cross-implementation decryption was re-verified compatible on 2026-08-31).

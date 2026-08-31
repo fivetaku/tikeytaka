@@ -16,6 +16,7 @@
 #   tkt sync [--check]        볼트 → 연결된 모든 .env 전파 (--check는 드라이런)
 #   tkt where                 볼트/매핑 파일 위치 출력
 #   tkt doctor                셀프 진단 (암호 저장소·볼트 접근·복호화·매핑 단계별 판정)
+#   tkt requires [경로...]    플러그인의 keys.json 선언을 볼트와 대조 (미등록 키 보고)
 set -euo pipefail
 umask 077
 
@@ -342,6 +343,68 @@ case "$cmd" in
     done < "$MAP"
     echo "sync 완료 (${changed}건 변경, ${errors}건 skip)"
     [ "$errors" = 0 ] || exit 3 ;;
+  requires)
+    # 플러그인이 자기가 필요로 하는 키를 <플러그인>/keys.json 으로 선언하면,
+    # 여기서 볼트와 대조해 "무엇이 빠졌는지"를 설치 전에 알려준다.
+    # (설계 근거: 플러그인마다 필요한 키를 사람이 기억해 수동 매핑하던 경로를 없앤다.)
+    command -v python3 >/dev/null 2>&1 || die "requires 는 python3 가 필요합니다 (keys.json 파싱)"
+    shift
+    SEARCH=()
+    if [ $# -gt 0 ]; then SEARCH=("$@")
+    else
+      for d in "$HOME/.claude/plugins/marketplaces"/*/plugins/* "$HOME/.claude/plugins/cache"/*/*/*; do
+        [ -d "$d" ] && SEARCH+=("$d")
+      done
+      [ ${#SEARCH[@]} -gt 0 ] || die "스캔할 플러그인 경로를 찾지 못했습니다 — 경로를 인자로 주세요: tkt requires <경로>"
+    fi
+    # 선언 수집 (service<TAB>env<TAB>required<TAB>plugin<TAB>docs)
+    DECL="$(mktmp)"
+    for d in "${SEARCH[@]}"; do
+      [ -f "$d/keys.json" ] || continue
+      python3 - "$d" <<'PY' >> "$DECL" || die "keys.json 파싱 실패: $d/keys.json"
+import json, os, sys
+d = sys.argv[1]
+name = os.path.basename(os.path.realpath(d))
+try:
+    spec = json.load(open(os.path.join(d, "keys.json"), encoding="utf-8"))
+except Exception as e:
+    print(f"keys.json 파싱 오류: {e}", file=sys.stderr); sys.exit(1)
+for k in spec.get("keys", []):
+    svc = k.get("service", "")
+    if not svc:
+        print(f"keys.json 항목에 service 없음: {d}", file=sys.stderr); sys.exit(1)
+    # 빈 필드 금지 — 탭은 IFS whitespace라 `IFS=$'\t' read`가 연속 탭을 하나로 병합해
+    # 필드가 통째로 밀린다. 선택 필드는 "-" 센티널로 채우고 bash 쪽에서 되돌린다.
+    print("\t".join([svc, k.get("env") or "-", "y" if k.get("required", True) else "n",
+                     name, k.get("docs") or "-"]))
+PY
+    done
+    if [ ! -s "$DECL" ]; then echo "keys.json 선언을 가진 플러그인이 없습니다 (${#SEARCH[@]}개 경로 스캔)"; exit 0; fi
+    load_pass
+    [ -f "$VAULT" ] || die "볼트 없음 — tkt init 먼저"
+    HAVE="$(mktmp)"; vault_body_to "$HAVE"
+    missing=0; total=0; optmiss=0
+    while IFS=$'\t' read -r svc env req plug docs; do
+      [ -n "$svc" ] || continue
+      [ "$env" = "-" ] && env=""      # 센티널 복원
+      [ "$docs" = "-" ] && docs=""
+      total=$((total+1))
+      found=0
+      while IFS= read -r line; do
+        [ "${line%%$'\t'*}" = "$svc" ] && { found=1; break; }
+      done < "$HAVE"
+      if [ "$found" = 1 ]; then
+        echo "ok   $plug :: $svc${env:+ → $env}"
+      elif [ "$req" = "y" ]; then
+        missing=$((missing+1))
+        echo "MISSING $plug :: $svc${env:+ → $env}${docs:+  (발급: $docs)}"
+      else
+        optmiss=$((optmiss+1))
+        echo "opt  $plug :: $svc 미등록 (선택 항목)${docs:+  (발급: $docs)}"
+      fi
+    done < <(sort -u "$DECL")
+    echo "— 선언 ${total}건, 필수 미등록 ${missing}건, 선택 미등록 ${optmiss}건"
+    [ "$missing" = 0 ] || { echo "미등록 키는 'tkt setp <service>' 또는 /tikeytaka:add 로 등록하세요." >&2; exit 4; } ;;
   where)
     echo "볼트: $VAULT"
     [ -f "$VAULT_PATH_FILE" ] && echo "경로 고정: $(cat "$VAULT_PATH_FILE")" || echo "경로 고정: (아직 — init에서 확정)"
@@ -394,5 +457,5 @@ case "$cmd" in
     if [ -f "$MAP" ] && [ -s "$MAP" ]; then echo "ok   매핑 $(grep -c . "$MAP" | tr -d ' ')건 ($MAP)"; else echo "     매핑 없음 ($MAP)"; fi
     if [ "$FAILED" = 0 ]; then echo "== 모두 정상 =="; else echo "== 문제 발견 — 위 FAIL 항목의 안내를 따르세요 =="; exit 1; fi ;;
   *)
-    grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,18p' ;;
+    grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,19p' ;;
 esac

@@ -65,6 +65,7 @@ API 키 중앙 볼트 플러그인 — 흩어진 `.env`의 키를 암호화 볼�
 | `/tikeytaka:list` | 관리 중 서비스·프로젝트 연결 현황 |
 | `/tikeytaka:sync` | 볼트 → 연결된 모든 .env 전파 |
 | `/tikeytaka:verify` | 등록 전·후 키 생사 실측 — 죽은 키는 볼트에 못 들어감 |
+| `/tikeytaka:requires` | 플러그인이 선언한 `keys.json`을 볼트와 대조 — 쓰기 전에 빠진 키를 찾음 |
 
 ## 새 기기 연결
 

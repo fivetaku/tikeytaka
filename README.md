@@ -65,6 +65,7 @@ The cloud only ever carries ciphertext; the key to open it never leaves your dev
 | `/tikeytaka:list` | Managed services and project connections |
 | `/tikeytaka:sync` | Propagate the vault to every connected `.env` |
 | `/tikeytaka:verify` | Live-check keys before/after registration — dead keys never enter the vault |
+| `/tikeytaka:requires` | Diff a plugin's declared `keys.json` against the vault — find missing keys before you hit them |
 
 ## Connecting a new device
 

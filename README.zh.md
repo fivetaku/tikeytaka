@@ -65,6 +65,7 @@ API 密钥中央保险库插件 — 把散落在各个 `.env` 中的密钥整合
 | `/tikeytaka:list` | 管理中的服务与项目连接情况 |
 | `/tikeytaka:sync` | 保险库 → 传播到所有已连接的 `.env` |
 | `/tikeytaka:verify` | 注册前后实测密钥存活 — 失效密钥绝不进入保险库 |
+| `/tikeytaka:requires` | 将插件声明的 `keys.json` 与保险库比对 — 使用前找出缺失的密钥 |
 
 ## 连接新设备
 
