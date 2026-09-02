@@ -342,6 +342,17 @@ case "$cmd" in
       echo "updated: $f :: $var"
     done < "$MAP"
     echo "sync 완료 (${changed}건 변경, ${errors}건 skip)"
+    # 볼트에는 있는데 어떤 파일에도 연결되지 않은 서비스 — "등록했는데 아무 데도 안 들어가는" 헛걸음 방지.
+    # (설계 근거: setp 직후 sync 가 0건으로 끝나면 성공처럼 보여 소비자가 키를 못 읽는 상태가 숨는다.)
+    unmapped=""
+    while IFS=$'\t' read -r svc _; do
+      [ -n "$svc" ] || continue
+      if ! grep -q $'\t'"$svc"'$' "$MAP"; then unmapped="$unmapped $svc"; fi
+    done < "$snap"
+    if [ -n "$unmapped" ]; then
+      echo "안내: 볼트에 있지만 연결된 파일이 없는 서비스 —$unmapped" >&2
+      echo "      필요하면: tkt map-add '<파일>' <VAR> <service> && tkt sync" >&2
+    fi
     [ "$errors" = 0 ] || exit 3 ;;
   requires)
     # 플러그인이 자기가 필요로 하는 키를 <플러그인>/keys.json 으로 선언하면,
