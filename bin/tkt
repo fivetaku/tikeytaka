@@ -15,8 +15,11 @@
 #   tkt map-list              연결 목록
 #   tkt sync [--check]        볼트 → 연결된 모든 .env 전파 (--check는 드라이런)
 #   tkt where                 볼트/매핑 파일 위치 출력
-#   tkt doctor                셀프 진단 (암호 저장소·볼트 접근·복호화·매핑 단계별 판정)
+#   tkt doctor                셀프 진단 (암호 저장소·볼트 접근·복호화·미러·매핑 단계별 판정)
 #   tkt requires [경로...]    플러그인의 keys.json 선언을 볼트와 대조 (미등록 키 보고)
+#
+# 정본 폴더(클라우드)에 접근 못 하는 프로세스(샌드박스·TCC·iCloud 미실체화)를 위해 정본 암호문의
+# 로컬 미러를 ~/.config/tikeytaka/mirror/ 에 유지한다 — 읽기(get/list/sync/requires)만 폴백, 쓰기는 정본 필수.
 set -euo pipefail
 umask 077
 
@@ -81,6 +84,9 @@ pin_vault_dir() {  # init에서만 호출 — 경로 확정
   printf '%s\n' "$d" > "$VAULT_PATH_FILE"
 }
 VAULT="$(vault_dir)/secrets.enc"
+# 로컬 미러 — 정본과 동일한 암호문(같은 암호로만 열림). 볼트 경로별로 분리해 다른 볼트끼리 덮어쓰지 않는다.
+MIRROR="$CONF_DIR/mirror/$(printf '%s' "$VAULT" | sha256 | cut -c1-16).enc"
+VAULT_SRC="$VAULT"; VAULT_STATE=""   # vault_locate 가 확정: ok | mirror | missing | denied
 
 # ---------- 복호화 암호 저장소 (OS별; 저장소 간 자동 폴백 없음 — 명시성 우선) ----------
 win_path() {
@@ -138,18 +144,45 @@ OSSL_ERR=""
 enc_file() { OSSL_ERR="$(printf '%s\n' "$PASS" | openssl enc "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>&1)"; }
 dec_file() { OSSL_ERR="$(printf '%s\n' "$PASS" | openssl enc -d "${OPENSSL_ARGS[@]}" -pass stdin -in "$1" -out "$2" 2>&1)"; }
 
-# 복호화 이전에 접근 실패를 원인별로 진단. 파일 부재 판정은 호출부 몫.
-vault_preflight() {
-  [ -f "$VAULT" ] || return 0
-  if ! head -c 8 "$VAULT" >/dev/null 2>&1; then
-    # iCloud 미실체화(dataless) 가능 — 강제 다운로드 후 최대 10초 대기
+# 정본 접근 상태 판정 — 읽힘(ok, 미러 갱신) / 접근불가+미러 있음(mirror) / 부재(missing) / 접근불가+미러 없음(denied)
+# (2026-09-06 실측: 샌드박스에서 `[ -f 정본 ]`이 거짓이라 "볼트 없음 — init 먼저"로 오보되던 경로를 여기서 차단)
+readable() { head -c 8 "$1" >/dev/null 2>&1; }
+mirror_refresh() { mkdir -p "$(dirname "$MIRROR")" 2>/dev/null && { cmp -s "$VAULT" "$MIRROR" 2>/dev/null || { cp -p "$VAULT" "$MIRROR" 2>/dev/null && chmod 600 "$MIRROR" 2>/dev/null; }; } || true; }
+vault_locate() {
+  VAULT_SRC="$VAULT"; VAULT_STATE=""
+  if [ -f "$VAULT" ] && readable "$VAULT"; then VAULT_STATE=ok; mirror_refresh; return 0; fi
+  if [ -f "$VAULT" ]; then
+    # 존재하나 읽기 불가 — iCloud 미실체화(dataless)면 강제 다운로드 후 최대 10초 대기
     if command -v brctl >/dev/null 2>&1; then
       brctl download "$VAULT" 2>/dev/null || true
-      local i=0; while [ "$i" -lt 10 ] && ! head -c 8 "$VAULT" >/dev/null 2>&1; do sleep 1; i=$((i+1)); done
+      local i=0; while [ "$i" -lt 10 ] && ! readable "$VAULT"; do sleep 1; i=$((i+1)); done
     fi
-    head -c 8 "$VAULT" >/dev/null 2>&1 || die "볼트 파일을 읽을 수 없음(암호 문제 아님): $VAULT — 이 프로세스가 클라우드 폴더 접근 권한이 없거나(샌드박스·TCC) iCloud 동기화 미완료. 일반 터미널에서 재시도하거나 'tkt doctor'로 진단하세요."
+    if readable "$VAULT"; then VAULT_STATE=ok; mirror_refresh; return 0; fi
+    VAULT_STATE=denied
+  else
+    local vdir; vdir="$(dirname "$VAULT")"
+    if ls "$vdir" >/dev/null 2>&1; then VAULT_STATE=missing; return 0; fi
+    if ls -A "$(dirname "$vdir")" 2>/dev/null | grep -qx "$(basename "$vdir")"; then VAULT_STATE=denied   # 폴더는 보이는데 못 열음
+    elif ls "$(dirname "$vdir")" >/dev/null 2>&1; then VAULT_STATE=missing; return 0                         # 폴더 미생성
+    else VAULT_STATE=denied; fi
   fi
-  [ "$(head -c 8 "$VAULT" 2>/dev/null)" = "Salted__" ] || die "볼트 파일이 openssl 암호문이 아님(Salted__ 매직 부재): $VAULT — iCloud 충돌 사본/절단 파일 의심. 'tkt doctor'로 진단하세요."
+  if [ -f "$MIRROR" ] && readable "$MIRROR"; then
+    VAULT_SRC="$MIRROR"; VAULT_STATE=mirror
+    echo "tkt: 정본($VAULT) 접근 불가(샌드박스·TCC·iCloud) — 로컬 미러($(stat -f %Sm "$MIRROR" 2>/dev/null || stat -c %y "$MIRROR" 2>/dev/null) 시점)로 읽습니다. 쓰기는 정본이 읽히는 터미널에서." >&2
+  fi
+}
+need_vault() {  # $1: r(읽기 — 미러 폴백 허용) | w(쓰기 — 정본 필수). 부재면 1 반환(호출부가 안내), 접근불가면 즉시 중단.
+  vault_locate
+  case "$VAULT_STATE" in
+    ok) return 0;;
+    missing) return 1;;
+    mirror) [ "$1" = r ] && return 0
+            die "정본 볼트($VAULT)에 접근할 수 없어 쓰기를 중단합니다(미러는 읽기 전용). 일반 터미널에서 실행하세요.";;
+    *) die "볼트 파일을 읽을 수 없음(암호 문제 아님): $VAULT — 이 프로세스가 클라우드 폴더 접근 권한이 없거나(샌드박스·TCC) iCloud 동기화 미완료. 일반 터미널에서 재시도하세요. (정본이 읽히는 터미널에서 'tkt list'를 한 번 실행하면 로컬 미러가 생겨 이런 환경에서도 읽기는 됩니다. 'tkt doctor'로 진단)";;
+  esac
+}
+vault_preflight() {  # 읽을 소스가 openssl 암호문인지 — 충돌 사본·절단 파일 조기 차단
+  [ "$(head -c 8 "$VAULT_SRC" 2>/dev/null)" = "Salted__" ] || die "볼트 파일이 openssl 암호문이 아님(Salted__ 매직 부재): $VAULT_SRC — iCloud 충돌 사본/절단 파일 의심. 'tkt doctor'로 진단하세요."
 }
 
 # ---------- TKT2 평문 포맷: #TKT2 / #SHA256:<본문해시> / TSV 본문 ----------
@@ -163,8 +196,9 @@ validate_plain() {
   return 0
 }
 vault_read_to() {  # $1: 평문 out. 실패 시 원본 무손상 중단.
+  [ -n "$VAULT_STATE" ] || vault_locate
   vault_preflight
-  dec_file "$VAULT" "$1" || die "볼트 복호화 실패 — 파일은 읽혔으므로 암호 불일치 가능성이 큼 [$(openssl version 2>/dev/null): ${OSSL_ERR%%$'\n'*}]. 원본($VAULT)은 변경되지 않았습니다. 'tkt doctor'로 진단하세요."
+  dec_file "$VAULT_SRC" "$1" || die "볼트 복호화 실패 — 파일은 읽혔으므로 암호 불일치 가능성이 큼 [$(openssl version 2>/dev/null): ${OSSL_ERR%%$'\n'*}]. 원본($VAULT_SRC)은 변경되지 않았습니다. 'tkt doctor'로 진단하세요."
   validate_plain "$1" || die "볼트 무결성 검증 실패(TKT2 포맷/해시 불일치) — 동기화 미완료·손상 가능. 원본은 변경되지 않았습니다."
 }
 vault_body_to() { local p; p="$(mktmp)"; vault_read_to "$p"; tail -n +3 "$p" > "$1"; }
@@ -183,6 +217,7 @@ vault_commit() {  # $1: 새 body 파일, $2: 편집 시작 시점의 암호문 �
     cp -p "$VAULT" "$VAULT.bak"
   fi
   mv "$cipher" "$VAULT"
+  mirror_refresh
 }
 
 # ---------- 항목 편집 (정확 필드 비교 — 정규식 미사용) ----------
@@ -191,7 +226,7 @@ vault_set_entry() {  # $1 svc, $2 val
   load_pass
   local body orig="" line
   body="$(mktmp)"
-  if [ -f "$VAULT" ]; then
+  if need_vault w; then
     local cur; cur="$(mktmp)"
     orig="$(sha256 < "$VAULT")"
     vault_body_to "$cur"
@@ -215,6 +250,8 @@ read_tty_secret() {  # $1 프롬프트 → 전역 REPLY_SECRET
 cmd="${1:-help}"
 case "$cmd" in
   init)
+    vault_locate
+    case "$VAULT_STATE" in mirror|denied) die "정본 볼트 폴더($(dirname "$VAULT"))에 접근할 수 없습니다 — 이 상태로 init 하면 분기 볼트가 생깁니다. 일반 터미널에서 실행하세요. ('tkt doctor'로 진단)";; esac
     if PASS="$(pass_get)" && [ -n "$PASS" ]; then
       if [ -f "$VAULT" ]; then
         tmp="$(mktmp)"
@@ -262,7 +299,7 @@ case "$cmd" in
   get)
     [ $# -eq 2 ] || die "usage: tkt get <service>"
     validate_service "$2"; load_pass
-    [ -f "$VAULT" ] || die "볼트 없음 — tkt init 먼저"
+    need_vault r || die "볼트 없음 — tkt init 먼저"
     body="$(mktmp)"; vault_body_to "$body"
     v=""
     while IFS= read -r line; do
@@ -273,7 +310,7 @@ case "$cmd" in
   del)
     [ $# -eq 2 ] || die "usage: tkt del <service>"
     validate_service "$2"; load_pass
-    [ -f "$VAULT" ] || die "볼트 없음"
+    need_vault w || die "볼트 없음"
     orig="$(sha256 < "$VAULT")"
     cur="$(mktmp)"; vault_body_to "$cur"
     body="$(mktmp)"; found=0
@@ -285,7 +322,7 @@ case "$cmd" in
     echo "del: $2" ;;
   list)
     load_pass
-    [ -f "$VAULT" ] || { echo "(볼트 없음 — tkt init 먼저)" >&2; exit 2; }
+    need_vault r || { echo "(볼트 없음 — tkt init 먼저)" >&2; exit 2; }
     body="$(mktmp)"; vault_body_to "$body"
     cut -f1 < "$body" ;;
   map-add)
@@ -305,7 +342,7 @@ case "$cmd" in
     [ $# -le 2 ] || die "usage: tkt sync [--check]"
     load_pass
     [ -f "$MAP" ] && [ -s "$MAP" ] || { echo "연결 없음 — tkt map-add 먼저"; exit 0; }
-    [ -f "$VAULT" ] || die "볼트 없음 — tkt init/set 먼저"
+    need_vault r || die "볼트 없음 — tkt init/set 먼저"
     snap="$(mktmp)"; vault_body_to "$snap"    # 스냅샷 1회 복호화 — 매핑마다 재복호화 금지
     changed=0; errors=0
     while IFS=$'\t' read -r file var svc; do
@@ -392,7 +429,7 @@ PY
     done
     if [ ! -s "$DECL" ]; then echo "keys.json 선언을 가진 플러그인이 없습니다 (${#SEARCH[@]}개 경로 스캔)"; exit 0; fi
     load_pass
-    [ -f "$VAULT" ] || die "볼트 없음 — tkt init 먼저"
+    need_vault r || die "볼트 없음 — tkt init 먼저"
     HAVE="$(mktmp)"; vault_body_to "$HAVE"
     missing=0; total=0; optmiss=0
     while IFS=$'\t' read -r svc env req plug docs; do
@@ -419,7 +456,8 @@ PY
   where)
     echo "볼트: $VAULT"
     [ -f "$VAULT_PATH_FILE" ] && echo "경로 고정: $(cat "$VAULT_PATH_FILE")" || echo "경로 고정: (아직 — init에서 확정)"
-    echo "매핑: $MAP" ;;
+    echo "매핑: $MAP"
+    if [ -f "$MIRROR" ]; then echo "미러: $MIRROR ($(stat -f %Sm "$MIRROR" 2>/dev/null || stat -c %y "$MIRROR" 2>/dev/null))"; else echo "미러: (아직 — 정본이 읽히는 곳에서 list 1회 실행 시 생성)"; fi ;;
   doctor)
     # 각 실패 지점을 단계별로 분리 판정 — "볼트 안 열림"의 원인을 한 번에 특정한다.
     FAILED=0
@@ -432,28 +470,27 @@ PY
       echo "  → 키체인이라면 이 프로세스 컨텍스트에서 security 접근이 막혔을 수 있음 — 일반 터미널에서 재시도. 자동화 경로는 TKT_PASSPHRASE_FILE 폴백 사용."
     fi
     echo "볼트    : $VAULT"
-    if [ ! -f "$VAULT" ]; then
-      FAILED=1
-      VDIR="$(dirname "$VAULT")"
-      if ls "$VDIR" >/dev/null 2>&1; then
-        echo "FAIL 볼트 파일 없음 (폴더는 접근 가능) — 이 기기에서 'tkt init' 미실행이거나 경로가 다름"
-      elif ls "$(dirname "$VDIR")" >/dev/null 2>&1; then
-        echo "FAIL 볼트 폴더 미생성: $VDIR — 'tkt init' 미실행이거나 vault.path/TIKEYTAKA_DIR 경로가 다름"
-      else
-        echo "FAIL 볼트 폴더 접근 불가: $VDIR — 샌드박스·TCC·iCloud 권한 문제 (파일이 없는 게 아닐 수 있음)"
-        echo "  → 일반 터미널에서 재시도. iCloud 미실체화면: brctl download \"$VAULT\""
-      fi
-    elif ! head -c 8 "$VAULT" >/dev/null 2>&1; then
-      FAILED=1; echo "FAIL 볼트 존재하나 읽기 불가 — 권한(TCC·샌드박스) 또는 iCloud 미실체화(dataless)"
-      echo "  → brctl download \"$VAULT\" 후 재시도"
-    elif [ "$(head -c 8 "$VAULT" 2>/dev/null)" != "Salted__" ]; then
-      FAILED=1; echo "FAIL 볼트 매직 불일치(openssl 암호문 아님) — iCloud 충돌 사본/절단 파일 의심"
-    else
-      echo "ok   볼트 읽기 + Salted__ 매직 ($(wc -c < "$VAULT" | tr -d ' ')바이트, mtime $(stat -f %Sm "$VAULT" 2>/dev/null || stat -c %y "$VAULT" 2>/dev/null))"
-    fi
+    vault_locate 2>/dev/null   # 판정은 명령 경로와 동일 로직 — doctor 만의 별도 판정 금지 (오진 분기 방지)
+    case "$VAULT_STATE" in
+      ok)
+        if [ "$(head -c 8 "$VAULT" 2>/dev/null)" != "Salted__" ]; then
+          FAILED=1; echo "FAIL 볼트 매직 불일치(openssl 암호문 아님) — iCloud 충돌 사본/절단 파일 의심"
+        else
+          echo "ok   볼트 읽기 + Salted__ 매직 ($(wc -c < "$VAULT" | tr -d ' ')바이트, mtime $(stat -f %Sm "$VAULT" 2>/dev/null || stat -c %y "$VAULT" 2>/dev/null))"
+        fi ;;
+      missing)
+        FAILED=1; echo "FAIL 볼트 없음 (폴더/상위는 접근 가능) — 이 기기에서 'tkt init' 미실행이거나 vault.path/TIKEYTAKA_DIR 경로가 다름" ;;
+      mirror)
+        echo "WARN 정본 접근 불가(샌드박스·TCC·iCloud) — 읽기는 로컬 미러로 폴백 중, 쓰기·init 은 일반 터미널에서"
+        echo "  → 정본 복구: 일반 터미널에서 재시도. iCloud 미실체화면: brctl download \"$VAULT\""
+        ;;
+      *)
+        FAILED=1; echo "FAIL 정본 접근 불가(샌드박스·TCC·iCloud 미실체화) + 미러 없음 — 이 컨텍스트에선 읽기도 불가"
+        echo "  → 일반 터미널에서 재시도(그곳에서 'tkt list' 1회면 미러가 생겨 이후 읽기 폴백 가능). iCloud 미실체화면: brctl download \"$VAULT\"" ;;
+    esac
     if [ "$FAILED" = 0 ]; then
       tmp="$(mktmp)"
-      if dec_file "$VAULT" "$tmp"; then
+      if dec_file "$VAULT_SRC" "$tmp"; then
         if validate_plain "$tmp"; then
           echo "ok   복호화 + TKT2 무결성 (키 $(tail -n +3 "$tmp" | grep -c . | tr -d ' ')개)"
         else
@@ -465,6 +502,12 @@ PY
     else
       echo "skip 복호화 테스트 (앞 단계 실패)"
     fi
+    case "$VAULT_STATE" in
+      ok) if [ -f "$MIRROR" ] && cmp -s "$VAULT" "$MIRROR"; then echo "ok   미러 정본과 동일 ($MIRROR)"
+          else FAILED=1; echo "FAIL 미러 없음/불일치 — 정상 환경인데 갱신 실패: $MIRROR 쓰기 권한 확인"; fi ;;
+      mirror) echo "ok   미러 사용 중 ($(stat -f %Sm "$MIRROR" 2>/dev/null || stat -c %y "$MIRROR" 2>/dev/null) 시점 — 정본보다 오래됐을 수 있음)" ;;
+      *) echo "     미러 없음 ($MIRROR)" ;;
+    esac
     if [ -f "$MAP" ] && [ -s "$MAP" ]; then echo "ok   매핑 $(grep -c . "$MAP" | tr -d ' ')건 ($MAP)"; else echo "     매핑 없음 ($MAP)"; fi
     if [ "$FAILED" = 0 ]; then echo "== 모두 정상 =="; else echo "== 문제 발견 — 위 FAIL 항목의 안내를 따르세요 =="; exit 1; fi ;;
   *)

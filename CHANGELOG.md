@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-09-06
+
+- **Local encrypted mirror + read-only fallback**: every successful read of the cloud vault refreshes a byte-identical ciphertext copy under `~/.config/tikeytaka/mirror/<vault-path-hash>.enc` (0600, opens only with the same passphrase, one file per vault path so different vaults never overwrite each other). When the canonical vault folder is unreachable — Claude Code Bash sandbox, macOS TCC denial, iCloud dataless placeholder — `get` / `list` / `sync` / `requires` now fall back to the mirror (with a stderr notice carrying the mirror timestamp) instead of failing. This is what actually fixes the recurring MCP/sandbox "vault unreachable" incidents; v0.4.0 only diagnosed them.
+- **Writes are fenced**: `set` / `del` / `init` refuse to run when the canonical vault is unreachable ("mirror is read-only"), so a sandboxed process can no longer create a divergent second vault. Previously `init` in that state would happily create one.
+- **Fix: "vault missing — run tkt init" false report**: under sandbox denial `[ -f vault ]` is false, so `get`/`list`/`sync` claimed the vault did not exist (the 2026-08-27 misdiagnosis). Presence is now resolved by a single `vault_locate` (ok / mirror / missing / denied) shared by every command **and** by `doctor` — doctor no longer keeps its own divergent folder check (it reported "folder not created" when only the parent was listable).
+- `doctor` shows mirror state (identical to canonical / in use with timestamp / absent); `where` prints the mirror path.
+- Regression suite: 66 cases (13 new), including 8 that run under a real `sandbox-exec` deny profile on macOS. Lesson recorded in the tests: deny paths must be real paths — `/var/...` never matches `/private/var/...`.
+
 ## 0.5.0 — 2026-09-01
 
 - **New `tkt requires`**: plugins declare the API keys they need in a `keys.json` at their root; `requires` scans installed plugins (marketplace clones + cache, or explicit paths) and diffs those declarations against the vault. Reports `ok` / `MISSING` (required, exit 4, with the issuing URL) / `opt` (optional, no exit impact). Read-only — never registers keys or touches `.env`. Removes the manual "which keys does this plugin need again?" step. New **requires skill** documents the `keys.json` schema; declarations live beside `plugin.json`, never inside it (unknown keys there fail `claude plugin validate`).

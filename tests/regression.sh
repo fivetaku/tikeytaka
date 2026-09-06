@@ -117,9 +117,20 @@ printf 'doc-pass' > "$WORK/pass5"; chmod 600 "$WORK/pass5"
 export TKT_PASSPHRASE_FILE="$WORK/pass5"
 bash "$TKT" set svc-doc DOCVAL1 >/dev/null 2>&1
 check "doctor 정상 상태 exit 0" 'bash "$TKT" doctor >/dev/null 2>&1'
-ERR_PERM="$(chmod 000 "$TIKEYTAKA_DIR/secrets.enc"; bash "$TKT" get svc-doc 2>&1 >/dev/null; chmod 600 "$TIKEYTAKA_DIR/secrets.enc")"
-check "읽기불가 볼트 → '읽을 수 없음' 보고" 'echo "$ERR_PERM" | grep -q "읽을 수 없음"'
-check "읽기불가 볼트 → '암호 불일치'로 오보하지 않음" '! echo "$ERR_PERM" | grep -q "암호 불일치"'
+mirror_of() { bash "$TKT" where 2>/dev/null | sed -n 's/^미러: \(.*\.enc\) (.*/\1/p'; }
+MIR="$(mirror_of)"
+check "정상 읽기 후 미러 생성(정본과 동일 암호문)" '[ -n "$MIR" ] && cmp -s "$TIKEYTAKA_DIR/secrets.enc" "$MIR"'
+chmod 000 "$TIKEYTAKA_DIR/secrets.enc"
+OUT_PERM="$(bash "$TKT" get svc-doc 2>"$WORK/perm.err")"
+check "읽기불가 볼트 + 미러 → 미러로 읽기 성공" '[ "$OUT_PERM" = "DOCVAL1" ]'
+check "읽기불가 볼트 + 미러 → stderr에 미러 폴백 안내" 'grep -q "미러" "$WORK/perm.err"'
+check "읽기불가 볼트 + 미러 → set 차단(쓰기 중단 안내)" '! bash "$TKT" set svc-doc X 2>"$WORK/w.err" && grep -q "쓰기를 중단" "$WORK/w.err"'
+mv "$MIR" "$WORK/mir.bak"
+ERR_PERM="$(bash "$TKT" get svc-doc 2>&1 >/dev/null)"
+check "읽기불가 볼트 + 미러 없음 → '읽을 수 없음' 보고" 'echo "$ERR_PERM" | grep -q "읽을 수 없음"'
+check "읽기불가 볼트 + 미러 없음 → '암호 불일치'로 오보하지 않음" '! echo "$ERR_PERM" | grep -q "암호 불일치"'
+check "읽기불가 볼트 + 미러 없음 → '볼트 없음'으로 오보하지 않음" '! echo "$ERR_PERM" | grep -q "볼트 없음"'
+mv "$WORK/mir.bak" "$MIR"; chmod 600 "$TIKEYTAKA_DIR/secrets.enc"
 cp "$TIKEYTAKA_DIR/secrets.enc" "$WORK/doc.good"
 echo "GARBAGE-NOT-CIPHER" > "$TIKEYTAKA_DIR/secrets.enc"
 ERR_MAGIC="$(bash "$TKT" get svc-doc 2>&1 >/dev/null)"
@@ -157,6 +168,34 @@ bash "$TKT" requires "$PLUGDIR/p-none" >/dev/null 2>&1; RC=$?
 check "깨진 JSON은 실패로 보고" '[ "$RC" != "0" ]'
 check "requires는 볼트를 수정하지 않음" '[ "$(bash "$TKT" get svc-doc)" = "DOCVAL1" ]'
 check "help에 requires 노출" 'bash "$TKT" help 2>/dev/null | grep -q "tkt requires"'
+
+echo "# 13. 실제 샌드박스(sandbox-exec) — 정본 폴더 접근 거부 환경에서 미러 폴백·쓰기 차단 (v0.6.0)"
+if command -v sandbox-exec >/dev/null 2>&1; then
+  SBX_DIR="$(mktemp -d "$HOME/.tkt-sbx.XXXXXX")"; SBX_DIR="$(cd "$SBX_DIR" && pwd -P)"   # /var→/private/var 심링크는 deny 매칭 실패 — 실경로 필수
+  export TIKEYTAKA_DIR="$SBX_DIR/v"
+  printf 'sbx-pass' > "$WORK/pass7"; chmod 600 "$WORK/pass7"; export TKT_PASSPHRASE_FILE="$WORK/pass7"
+  bash "$TKT" set svc-sbx SBXVAL >/dev/null 2>&1
+  SBX_MIR="$(mirror_of)"
+  DENY="(version 1)(allow default)(deny file-read* (subpath \"$SBX_DIR/v\"))(deny file-write* (subpath \"$SBX_DIR/v\"))"
+  check "샌드박스가 실제로 정본을 가림" '! sandbox-exec -p "$DENY" ls "$SBX_DIR/v" >/dev/null 2>&1'
+  check "샌드박스 get → 미러로 값 회수" '[ "$(sandbox-exec -p "$DENY" bash "$TKT" get svc-sbx 2>/dev/null)" = "SBXVAL" ]'
+  check "샌드박스 list → 미러로 목록" '[ "$(sandbox-exec -p "$DENY" bash "$TKT" list 2>/dev/null)" = "svc-sbx" ]'
+  check "샌드박스 set → 차단" '! sandbox-exec -p "$DENY" bash "$TKT" set svc-sbx NEW >/dev/null 2>&1'
+  check "샌드박스 init → 분기 볼트 생성 차단" '! sandbox-exec -p "$DENY" bash "$TKT" init </dev/null >/dev/null 2>&1'
+  check "샌드박스 doctor → 미러 사용 중 표시" 'sandbox-exec -p "$DENY" bash "$TKT" doctor 2>/dev/null | grep -q "미러 사용 중"'
+  mv "$SBX_MIR" "$WORK/sbxmir.bak"
+  check "샌드박스 + 미러 없음 → '읽을 수 없음'(볼트 없음 오보 아님)" 'sandbox-exec -p "$DENY" bash "$TKT" get svc-sbx 2>&1 >/dev/null | grep -q "읽을 수 없음"'
+  mv "$WORK/sbxmir.bak" "$SBX_MIR"
+  check "샌드박스 밖 정본 값 불변" '[ "$(bash "$TKT" get svc-sbx 2>/dev/null)" = "SBXVAL" ]'
+  rm -f "$SBX_MIR"; rm -rf "$SBX_DIR"
+else
+  echo "  skip - sandbox-exec 없음(macOS 전용)"
+fi
+
+# 테스트 볼트들의 미러 정리 (경로 해시별 파일 — 실사용 미러는 경로가 달라 건드리지 않음)
+for d in "$WORK/vault" "$WORK/vault2" "$WORK/vault3" "$FAKEHOME/.tikeytaka"; do
+  h="$(printf '%s' "$d/secrets.enc" | shasum -a 256 | cut -c1-16)"; rm -f "$HOME/.config/tikeytaka/mirror/$h.enc"
+done
 
 echo
 echo "결과: $PASS_N passed, $FAIL_N failed"
