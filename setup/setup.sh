@@ -141,6 +141,64 @@ if [ ! -f "$SETUP_MARKER" ]; then
   printf '{"setup":true,"plugin":"%s","ts":%s}\n' "$PLUGIN" "$ts" > "$SETUP_MARKER"
 fi
 
+# --- per-project memory note (idempotent, once per Claude Code project) ---
+# Writes a short "how this project uses tikeytaka" note into the project's auto-memory
+# (~/.claude/projects/<slug>/memory/) so later sessions don't re-learn the vault→map→sync
+# flow or misread an auth 401/403 as a broken key. Runs only when the project dir already
+# exists (i.e. a real Claude Code project), never overwrites an existing note, and never
+# contains secret values — only service names and commands.
+write_project_memory() {
+  [ -n "${PWD:-}" ] || return 0
+  slug="$(printf '%s' "$PWD" | sed 's/[^A-Za-z0-9]/-/g')"
+  proj_dir="$CONFIG_DIR/projects/$slug"
+  [ -d "$proj_dir" ] || return 0
+  mem_dir="$proj_dir/memory"
+  note="$mem_dir/tikeytaka-usage.md"
+  [ -f "$note" ] && return 0
+  mkdir -p "$mem_dir" 2>/dev/null || return 0
+  lang="$(detect_lang)"
+  if [ "$lang" = "ko" ]; then
+    cat > "$note" <<'MD'
+---
+name: tikeytaka-usage
+description: 이 프로젝트에서 API 키를 다루는 방법 — tikeytaka 볼트 → map-add → sync. 키 값 인라인·채팅 노출 금지, 401/403은 헤더·URL 먼저 점검
+metadata:
+  type: project
+---
+
+- **CLI 경로**: PATH에 없다. `TKT="$(ls -d "$HOME/.claude/plugins/cache/gptaku-plugins/tikeytaka/"*/bin/tkt | sort -V | tail -1)"`로 최신 버전 절대경로를 잡아 `bash "$TKT" <cmd>`로 부른다.
+- **정본은 볼트**(`tkt list`로 서비스명 확인). 프로젝트 `.env`는 볼트에서 채워지는 사본이다. 키를 쓰는 파일마다 `map-add '<절대경로 .env>' <VAR> <service>` 뒤 `sync --check` → `sync`. 등록만으로는 아무 데도 전파되지 않는다.
+- **값은 셸 변수로만**: `K="$(bash "$TKT" get <service>)"`. 명령행 인라인(`VAR=<값> cmd`), echo, 로그, 채팅 출력 금지. 새 키 등록은 별도 터미널에서 `setp <service>`(숨김 입력) 또는 `/tikeytaka:add`.
+- **볼트 오류는 `tkt doctor`가 정본**. "암호 불일치"로 추측 진단하지 않는다(샌드박스·TCC·iCloud dataless가 흔한 원인).
+- **API가 401/403을 내면 키 교체 전에 헤더 이름·base URL 경로 중복(`/v1` 이중 부착 등)·키 용도(소비자 키 vs 관리자 키)를 먼저 점검**한다. 정상 키도 잘못된 헤더로 보내면 401이 난다.
+MD
+  else
+    cat > "$note" <<'MD'
+---
+name: tikeytaka-usage
+description: How this project handles API keys — tikeytaka vault → map-add → sync. Never inline or print key values; on 401/403 check header and URL before rotating
+metadata:
+  type: project
+---
+
+- **CLI path**: not on PATH. Resolve the newest installed version with `TKT="$(ls -d "$HOME/.claude/plugins/cache/gptaku-plugins/tikeytaka/"*/bin/tkt | sort -V | tail -1)"` and call `bash "$TKT" <cmd>`.
+- **The vault is the source of truth** (`tkt list` for service names). The project `.env` is a copy filled from the vault: for each file that consumes a key run `map-add '<absolute .env path>' <VAR> <service>`, then `sync --check` → `sync`. Registering a key alone propagates nothing.
+- **Values only in shell variables**: `K="$(bash "$TKT" get <service>)"`. No inline `VAR=<value> cmd`, no echo, no logs, no chat output. Register new keys in a separate terminal with `setp <service>` (hidden prompt) or `/tikeytaka:add`.
+- **`tkt doctor` is the authority on vault errors.** Do not guess "passphrase mismatch" — sandbox/TCC denial and iCloud dataless files are the usual causes.
+- **On an API 401/403, check the header name, duplicated base-URL paths (e.g. `/v1` twice) and the key's purpose (consumer vs admin key) before rotating anything.** A valid key sent with the wrong header also returns 401.
+MD
+  fi
+  idx="$mem_dir/MEMORY.md"
+  if ! grep -q 'tikeytaka-usage.md' "$idx" 2>/dev/null; then
+    if [ "$lang" = "ko" ]; then
+      printf -- '- [tikeytaka 키 사용법](tikeytaka-usage.md) — 볼트→map-add→sync, 값 출력 금지, 401/403은 헤더·URL 먼저\n' >> "$idx"
+    else
+      printf -- '- [tikeytaka key usage](tikeytaka-usage.md) — vault→map-add→sync, never print values, check header/URL before rotating on 401/403\n' >> "$idx"
+    fi
+  fi
+}
+write_project_memory 2>/dev/null || true
+
 # --- ask mode: emit the star prompt EXACTLY ONCE, recording it deterministically ---
 # Only the command flow passes "ask". Bare / silent skill invocations never reach here,
 # so they neither prompt nor record — the prompt is shown at most once, by a command,
