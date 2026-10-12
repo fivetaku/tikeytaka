@@ -1,0 +1,12 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  plugin:
+    uses: fivetaku/.github/.github/workflows/plugin-check.yml@main
+    with:
+      test-command: bash tests/regression.sh
+      test-os: macos-latest
+      python-packages: ''
