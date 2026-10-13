@@ -1,0 +1,61 @@
+{
+  "routes": [
+    {
+      "skill": "tikeytaka:add",
+      "when": "새 API 키를 등록·갱신할 때(키 값은 채팅으로 받지 않는다)",
+      "priority": 30,
+      "keywords": [
+        "키 등록",
+        "키 새로 발급",
+        "키 발급받",
+        "키 갱신",
+        "api 키 넣",
+        "토큰 발급받",
+        "register key"
+      ]
+    },
+    {
+      "skill": "tikeytaka:sync",
+      "when": "볼트의 키를 연결된 프로젝트 .env들에 전파할 때",
+      "priority": 30,
+      "keywords": [
+        "키 동기화",
+        "키 전파",
+        "env 반영",
+        "env들에 동기화",
+        "tkt sync"
+      ]
+    },
+    {
+      "skill": "tikeytaka:scan",
+      "when": "흩어진 .env 키를 찾아 볼트로 모을 때",
+      "priority": 30,
+      "keywords": [
+        "env 스캔",
+        "흩어진 키",
+        "키 통합",
+        "키 정리해"
+      ]
+    },
+    {
+      "skill": "tikeytaka:verify",
+      "when": "API 키가 살아 있는지 실호출로 확인할 때",
+      "priority": 30,
+      "keywords": [
+        "키 검증",
+        "키 되는지",
+        "키 작동",
+        "키 살아"
+      ]
+    },
+    {
+      "skill": "tikeytaka:list",
+      "when": "관리 중인 키 목록을 볼 때",
+      "priority": 30,
+      "keywords": [
+        "키 목록",
+        "무슨 키 관리"
+      ]
+    }
+  ]
+}
