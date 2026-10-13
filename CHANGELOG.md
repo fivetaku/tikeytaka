@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.2 — 2026-10-13
+- **Routed through gptaku-core.** Declares `gptaku-core` as a dependency and adds `routing.json`, so requests that match this plugin's skills are pointed to them before Claude handles the work itself or reaches for native tools. Existing users: run `/reload-plugins` after updating, or reinstall the plugin, so gptaku-core gets installed. Opt out with `GPTAKU_ROUTER=off`.
+
 ## 0.6.1 — 2026-09-08
 
 - **Per-project memory note on setup**: `setup/setup.sh` now writes `tikeytaka-usage.md` (+ a `MEMORY.md` index line) into the current project's Claude Code auto-memory (`~/.claude/projects/<slug>/memory/`) the first time the plugin runs in that project. The note records the vault→`map-add`→`sync` flow, the "values only in shell variables" rule, `tkt doctor` as the diagnosis authority, and — motivated by a 2026-09-08 misdiagnosis where a valid admin-only key sent as `Bearer` returned 401 and was reported as "broken, needs rotation" — a reminder to check header name, duplicated base-URL paths and key purpose before rotating anything. Language follows the same ko/ja/en detection as the star prompt. Idempotent: never overwrites an existing note, never duplicates the index line, skips when no Claude project dir exists for the cwd, and contains no secret values.
