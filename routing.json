@@ -56,6 +56,12 @@
         "키 목록",
         "무슨 키 관리"
       ]
+    },
+    {
+      "skill": "tikeytaka:tikeytaka",
+      "when": "API 키 볼트 전반(상태 확인·기능 선택)을 쓸 때",
+      "priority": 5,
+      "keywords": []
     }
   ]
 }
