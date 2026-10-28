@@ -91,6 +91,7 @@ Por la nube solo circula texto cifrado; la llave para abrirlo nunca sale de tus 
 - El registro en el Llavero de macOS (`security -w`) pasa la frase por argv una vez durante init — limitación de la herramienta.
 - Es una bóveda personal. Para compartir en equipo, control de acceso o auditoría, usa un SaaS de secretos (p. ej. Infisical).
 - Ninguna bóveda local protege una cuenta ya comprometida (keyloggers, etc.).
+- Qué protege la bóveda y qué no (modelo de amenazas): ver [Threat model en README.md](README.md#threat-model). Hasta la 0.6.3 quedaban copias descifradas de la bóveda en `$TMPDIR` (issue #2) — tras actualizar a 0.7.0, ejecuta `tkt doctor`.
 
 ## Código fuente
 

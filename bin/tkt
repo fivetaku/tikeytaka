@@ -525,6 +525,40 @@ PY
       *) echo "     미러 없음 ($MIRROR)" ;;
     esac
     if [ -f "$MAP" ] && [ -s "$MAP" ]; then echo "ok   매핑 $(grep -c . "$MAP" | tr -d ' ')건 ($MAP)"; else echo "     매핑 없음 ($MAP)"; fi
+    # 위생 점검 — 볼트 밖에 평문이 새는 곳과 위험 설정. 읽기 전용(지우지 않음), WARN 은 실패로 치지 않는다.
+    # (설계 근거: 2026-10-28 보안 검토 — v0.6.x 가 남긴 평문 $TMPDIR/tkt.* 186개, 전역 env 키, npm postinstall 탈취 사례)
+    echo "== 위생 =="
+    WARN=0
+    hw() { WARN=$((WARN+1)); echo "WARN $1"; echo "  → $2"; }
+    n="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tkt.*' -type f -user "$(id -un)" 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$n" != 0 ]; then hw "\$TMPDIR 에 이전 버전이 남긴 tkt.* 파일 ${n}개 — 복호화된 볼트 평문일 수 있음" "find \"\${TMPDIR:-/tmp}\" -maxdepth 1 -name 'tkt.*' -type f -user \"\$(id -un)\" 로 확인 후 삭제(휴지통으로 옮겼다면 휴지통도 비우기)"
+    else echo "ok   \$TMPDIR 잔여 tkt.* 없음"; fi
+    n="$(find "$(dirname "$VAULT")" -maxdepth 1 -name 'tkt.*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$n" != 0 ]; then hw "볼트 폴더에 중단된 쓰기의 임시 암호문 tkt.* ${n}개" "$(dirname "$VAULT") 의 tkt.* 삭제 (secrets.enc·.bak 은 건드리지 말 것)"
+    else echo "ok   볼트 폴더 잔여 tkt.* 없음"; fi
+    if [ -f "$MAP" ] && [ -n "$(find "$MAP" -perm -004 -o -perm -040 2>/dev/null)" ]; then hw "매핑 파일이 다른 사용자에게 읽힘(키가 있는 파일 위치 목록)" "chmod 600 \"$MAP\""; fi
+    if [ -f "$MAP" ]; then
+      n=0
+      while IFS=$'\t' read -r file _ _; do
+        f="${file/#\~/$HOME}"; [ -f "$f" ] || continue
+        [ -n "$(find "$f" -perm -004 -o -perm -040 2>/dev/null)" ] && n=$((n+1))
+      done < <(sort -u "$MAP")
+      if [ "$n" != 0 ]; then hw "연결된 .env 중 ${n}개가 그룹·다른 사용자에게 읽힘" "tkt map-list 로 위치 확인 후 chmod 600"; else echo "ok   연결된 .env 권한(소유자 전용)"; fi
+    fi
+    if [ -f "$CONF_DIR/shell.env" ]; then
+      n="$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=.' "$CONF_DIR/shell.env" 2>/dev/null || true)"
+      if [ "${n:-0}" != 0 ]; then hw "shell.env 의 비밀 ${n}개가 셸을 통해 모든 프로세스 환경변수에 들어감" "필요한 명령에서만 'tkt get' 으로 주입하는 래퍼로 바꾸고 shell.env 에서 제거"; fi
+    fi
+    if command -v npm >/dev/null 2>&1; then
+      if [ "$(npm config get ignore-scripts 2>/dev/null)" = "true" ]; then echo "ok   npm 의존성 설치 스크립트 차단(ignore-scripts=true)"
+      else hw "npm 이 패키지 설치 스크립트(postinstall)를 실행함 — 악성 패키지가 .env·키체인을 읽을 수 있음" "npm config set ignore-scripts true (네이티브 빌드가 필요한 패키지만 npm rebuild <패키지>)"; fi
+    fi
+    if command -v pnpm >/dev/null 2>&1; then
+      v="$(pnpm config get minimum-release-age 2>/dev/null)"
+      case "$v" in ''|undefined|0) hw "pnpm 이 막 공개된 버전도 바로 설치함" "pnpm config set --global minimum-release-age 1440 (분 단위, 1일)";;
+        *) echo "ok   pnpm 새 버전 대기 ${v}분";; esac
+    fi
+    [ "$WARN" = 0 ] && echo "ok   위생 경고 없음" || echo "     위생 경고 ${WARN}건 (볼트 동작과 별개 — 종료 코드에 반영하지 않음)"
     if [ "$FAILED" = 0 ]; then echo "== 모두 정상 =="; else echo "== 문제 발견 — 위 FAIL 항목의 안내를 따르세요 =="; exit 1; fi ;;
   *)
     grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,19p' ;;

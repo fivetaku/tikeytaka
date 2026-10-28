@@ -85,6 +85,24 @@ The cloud only ever carries ciphertext; the key to open it never leaves your dev
 | Windows (Git Bash + OneDrive/Google Drive + DPAPI) | Implemented, provisional |
 | Linux (secret-tool + Dropbox, or manual `TIKEYTAKA_DIR`) | Implemented, provisional |
 
+## Threat model
+
+What the vault protects against, and what it cannot.
+
+| Threat | Example | tikeytaka |
+|---|---|---|
+| Cloud or sync leak | iCloud account takeover, a mis-shared folder | **Protected** — only ciphertext (AES-256-CBC, PBKDF2 600k) leaves the machine |
+| Chat, shell history, logs | pasting a key into a chat, `history` | **Protected** — `setp` hidden input, values never printed, keys passed to `openssl`/`curl` via stdin only |
+| Leftovers on disk | plaintext temp files, backups, a lost laptop | **Protected since 0.7.0** — every run works in a private 0700 folder that is removed on exit, error, Ctrl-C or TERM. Versions up to 0.6.3 left decrypted vault copies in `$TMPDIR` (issue #2) — run `tkt doctor` after updating |
+| Another macOS user on the same machine | a second account | **Protected** — vault, mirror, mappings and synced `.env` files are owner-only |
+| **Malicious code running as you** | an npm `postinstall` script, a rogue editor extension, a compromised agent skill | **Not protected — by design no local vault can be.** It can read your `.env` files and environment, and on macOS the vault passphrase can be read from the login Keychain via `/usr/bin/security` without a prompt |
+
+For the last row, protection has to happen before the code runs:
+
+- Block dependency install scripts: `npm config set ignore-scripts true`, and delay brand-new versions with `pnpm config set --global minimum-release-age 1440`. `tkt doctor` checks both.
+- Keep secrets out of global environment variables — inject a key only into the command that needs it: `VAR="$(tkt get <service>)" <command>`.
+- Keep keys rotatable: if you suspect exposure, re-issue at the provider, `tkt setp <service>`, `tkt sync`, then revoke the old key.
+
 ## Known limits (honest disclosure)
 
 - **No concurrent editing**: simultaneous `set`/`del` from two devices makes one side halt on conflict detection (data stays safe). Single-user tool by design.
