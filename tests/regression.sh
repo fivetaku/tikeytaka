@@ -8,6 +8,7 @@ export TIKEYTAKA_DIR="$WORK/vault"
 export TKT_PASSPHRASE_FILE="$WORK/pass"
 export HOME_REAL="$HOME"
 printf 'test-passphrase-1234' > "$TKT_PASSPHRASE_FILE"; chmod 600 "$TKT_PASSPHRASE_FILE"
+mkdir -p "$WORK/tmp"; export TMPDIR="$WORK/tmp"   # tkt 임시파일을 격리 폴더로 — 실제 $TMPDIR 에 테스트 잔여물 금지 + 누출 계수(#14)
 PASS_N=0; FAIL_N=0
 ok()   { PASS_N=$((PASS_N+1)); echo "  ok  - $1"; }
 fail() { FAIL_N=$((FAIL_N+1)); echo "  FAIL - $1"; }
@@ -67,7 +68,7 @@ bash "$TKT" sync >/dev/null 2>&1
 check '백슬래시 값 리터럴 유지(행 분리 없음)' 'grep -qF "FOO=abc\ndef" "$E" && [ "$(wc -l < "$E" | tr -d " ")" = "2" ]'
 bash "$TKT" sync --check > "$WORK/chk.out" 2>&1
 check "변경 없으면 --check 0건" 'grep -q "0건 변경" "$WORK/chk.out"'
-grep -v "^$E	" "$MAPF" > "$MAPF.n" 2>/dev/null; mv "$MAPF.n" "$MAPF"
+grep -v "^$E	" "$MAPF" > "$MAPF.n" 2>/dev/null; cat "$MAPF.n" > "$MAPF"; mv "$MAPF.n" "$WORK/map.n.done"   # cat 으로 덮어써 원본 권한(0600) 유지
 
 echo "# 6. 편집 중 외부 변경 감지 (해시 가드) — 코드 경로 직접 검증"
 S1="$(vault_sha)"
@@ -192,8 +193,55 @@ else
   echo "  skip - sandbox-exec 없음(macOS 전용)"
 fi
 
+echo "# 14. 임시파일 누출 — 정상·실패·신호 종료 뒤 tkt.* 0개 (이슈 #2)"
+export TIKEYTAKA_DIR="$WORK/vault4"
+export HOME="$WORK/home14"; mkdir -p "$HOME"   # 실제 ~/.config/tikeytaka(map.tsv·미러)를 건드리지 않게 격리
+printf 'leak-pass' > "$WORK/pass8"; chmod 600 "$WORK/pass8"; export TKT_PASSPHRASE_FILE="$WORK/pass8"
+LEAKENV="$WORK/envdir"; mkdir -p "$LEAKENV"; printf 'LEAK_KEY=old\n' > "$LEAKENV/.env"; chmod 600 "$LEAKENV/.env"
+leaks() { find "$TMPDIR" "$TIKEYTAKA_DIR" "$LEAKENV" -maxdepth 1 -name 'tkt.*' 2>/dev/null | wc -l | tr -d ' '; }
+bash "$TKT" set leak-svc CANARY-LEAK-0 >/dev/null 2>&1
+bash "$TKT" map-add "$LEAKENV/.env" LEAK_KEY leak-svc >/dev/null 2>&1
+check "시작 시점 잔여물 0" '[ "$(leaks)" = "0" ]'
+i=0; while [ "$i" -lt 20 ]; do
+  printf '%s' "CANARY-LEAK-$i" | bash "$TKT" set-stdin leak-svc >/dev/null 2>&1
+  bash "$TKT" set leak-tmp "CANARY-T$i" >/dev/null 2>&1
+  bash "$TKT" get leak-svc >/dev/null 2>&1
+  bash "$TKT" list >/dev/null 2>&1
+  bash "$TKT" sync >/dev/null 2>&1
+  bash "$TKT" del leak-tmp >/dev/null 2>&1
+  i=$((i+1))
+done
+bash "$TKT" requires "$PLUGDIR/p-one" >/dev/null 2>&1
+bash "$TKT" doctor >/dev/null 2>&1
+check "정상 종료 20회 반복(set·set-stdin·get·list·sync·del·requires·doctor) 뒤 잔여물 0" '[ "$(leaks)" = "0" ]'
+check "sync가 마지막 값으로 갱신(반복이 실제로 돌았음)" 'grep -q "^LEAK_KEY=CANARY-LEAK-19$" "$LEAKENV/.env"'
+bash "$TKT" get no-such-svc >/dev/null 2>&1; RC=$?
+check "실패 종료(없는 서비스 get) exit!=0 + 잔여물 0" '[ "$RC" != "0" ] && [ "$(leaks)" = "0" ]'
+# sync 가 .env 옆 임시파일을 만든 뒤 실패하는 경로 — 가짜 stat 으로 chmod 를 실패시킨다
+FAKEBIN="$WORK/fakebin"; mkdir -p "$FAKEBIN"
+printf '#!/bin/sh\necho 999\n' > "$FAKEBIN/stat"; chmod +x "$FAKEBIN/stat"
+bash "$TKT" set leak-svc CANARY-LEAK-SYNCFAIL >/dev/null 2>&1
+PATH="$FAKEBIN:$PATH" bash "$TKT" sync >/dev/null 2>&1; RC=$?
+check "실패 종료(sync 중 chmod 실패) exit!=0 + .env 옆 잔여물 0" '[ "$RC" != "0" ] && [ "$(leaks)" = "0" ]'
+check "실패한 sync는 .env 원본을 바꾸지 않음" 'grep -q "^LEAK_KEY=CANARY-LEAK-19$" "$LEAKENV/.env"'
+# 신호 종료 — openssl 을 느리게 감싸 복호화·암호화 도중에 TERM/INT 를 보낸다
+mv "$FAKEBIN/stat" "$WORK/stat.off"
+REAL_OSSL="$(command -v openssl)"
+printf '#!/bin/sh\nsleep 1\nexec "%s" "$@"\n' "$REAL_OSSL" > "$FAKEBIN/openssl"; chmod +x "$FAKEBIN/openssl"
+PATH="$FAKEBIN:$PATH" bash "$TKT" list >/dev/null 2>&1 & BGP=$!; sleep 0.5; kill -TERM "$BGP"; wait "$BGP"; RC=$?
+check "TERM 중단(list 복호화 도중) exit 143 + 잔여물 0" '[ "$RC" = "143" ] && [ "$(leaks)" = "0" ]'
+# 비대화형 셸의 백그라운드 작업은 SIGINT 가 무시된 채 시작돼 트랩할 수 없다 — 작업 제어(set -m)로 실제 Ctrl-C 와 같은 조건을 만든다
+set -m
+PATH="$FAKEBIN:$PATH" bash "$TKT" set leak-sig CANARY-SIG >/dev/null 2>&1 & BGP=$!; sleep 2.5; kill -INT "$BGP"; wait "$BGP"; RC=$?
+check "INT 중단(set 암호화 도중 — 볼트 폴더에 임시 암호문이 있는 구간) exit 130 + 잔여물 0" '[ "$RC" = "130" ] && [ "$(leaks)" = "0" ]'
+PATH="$FAKEBIN:$PATH" bash "$TKT" set leak-sig CANARY-SIG >/dev/null 2>&1 & BGP=$!; sleep 2.5; kill -HUP "$BGP"; wait "$BGP"; RC=$?
+check "HUP 중단(set 암호화 도중) exit 129 + 잔여물 0" '[ "$RC" = "129" ] && [ "$(leaks)" = "0" ]'
+set +m
+check "중단된 set은 볼트를 바꾸지 않음" '! bash "$TKT" get leak-sig >/dev/null 2>&1'
+export HOME="$HOME_REAL"
+
 # 테스트 볼트들의 미러 정리 (경로 해시별 파일 — 실사용 미러는 경로가 달라 건드리지 않음)
-for d in "$WORK/vault" "$WORK/vault2" "$WORK/vault3" "$FAKEHOME/.tikeytaka"; do
+for d in "$WORK/vault" "$WORK/vault2" "$WORK/vault3" "$WORK/vault4" "$FAKEHOME/.tikeytaka"; do
   h="$(printf '%s' "$d/secrets.enc" | shasum -a 256 | cut -c1-16)"; rm -f "$HOME/.config/tikeytaka/mirror/$h.enc"
 done
 

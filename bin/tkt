@@ -35,10 +35,26 @@ OPENSSL_ARGS=(-aes-256-cbc -salt -pbkdf2 -iter 600000 -md sha256)
 die() { echo "tkt: $*" >&2; exit 1; }
 sha256() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'; else sha256sum | awk '{print $1}'; fi; }
 
-TMPFILES=()
-cleanup() { local f; for f in ${TMPFILES[@]+"${TMPFILES[@]}"}; do rm -f "$f"; done; }
+# 임시파일: 실행마다 전용 0700 작업 폴더(WORK) 안에 만들고 종료 시 폴더째 지운다.
+# 다른 폴더에 만들어야 하는 것(볼트 폴더의 암호문, .env 옆 sync 파일)은 $WORK/.reg 에 경로를 적어 함께 지운다.
+# (설계 근거: 이슈 #2, 2026-09-16 제보 — 예전 mktmp는 $(...) 서브셸에서 배열에 등록해 부모 목록이 늘 비었고,
+#  정상 종료에도 복호화된 볼트가 $TMPDIR 에 남았다. 2026-10-28 실측 186개 중 94개 평문.
+#  파일에 적는 등록은 서브셸에서 해도 부모가 읽는다 — 제보자 수정안 채택.)
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/tkt.XXXXXX")" || { echo "tkt: 작업 폴더 생성 실패" >&2; exit 1; }
+REG="$WORK/.reg"; : > "$REG"
+cleanup() {
+  local f
+  if [ -f "$REG" ]; then while IFS= read -r f; do [ -n "$f" ] && rm -f "$f"; done < "$REG"; fi
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
-mktmp() { local t; t="$(mktemp "${1:-${TMPDIR:-/tmp}}/tkt.XXXXXX")"; TMPFILES+=("$t"); printf '%s' "$t"; }
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM   # 신호로 끝나도 EXIT 트랩이 돌게 (SIGKILL은 불가 — WORK가 0700이라 피해는 소유자 범위)
+mktmp() {
+  local t
+  if [ -n "${1:-}" ]; then t="$(mktemp "$1/tkt.XXXXXX")"; printf '%s\n' "$t" >> "$REG"
+  else t="$(mktemp "$WORK/f.XXXXXX")"; fi
+  printf '%s' "$t"
+}
 
 # ---------- 입력 검증 (쓰기 전에 거부 — 정규식 오작동·TSV 주입 차단) ----------
 validate_service() {
