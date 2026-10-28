@@ -28,16 +28,27 @@ description: API 키의 생사를 등록 전·후에 실호출로 검증한다. 
 
 ## 알려진 프로바이더 레시피 (2026-08 실측 검증됨)
 
-`np() { env -u HTTP_PROXY -u HTTPS_PROXY curl -s -m 10 --config - "$@"; }` 전제.
+`np() { env -u HTTP_PROXY -u HTTPS_PROXY curl -s -m 10 --config - "$@"; }` 전제. 키는 **`printf`(셸 내장 — 새 프로세스가 아님)로 stdin 설정에만** 넣는다. 그래야 `ps`·셸 히스토리에 안 남는다.
+
+```bash
+K="$(bash "$TKT" get openai-api-key)"     # 변수로만, 출력 금지
+printf 'url = "https://api.openai.com/v1/models"\nheader = "Authorization: Bearer %s"\n' "$K" \
+  | np -o /dev/null -w '%{http_code}\n'
+unset K
+```
+
+- 헤더로 보낼 수 있는 서비스는 반드시 헤더로 보낸다 — URL 쿼리(`?key=`)는 프록시·서버 접근 로그에 남는다.
+- URL 경로·쿼리에만 받는 서비스(Telegram `bot<K>`, data.go.kr `serviceKey`)는 `url = "…"` 줄을 같은 stdin 설정에 넣어 argv 노출만 막는다. 상대 서버 로그에는 남는다는 점을 감수한다.
+- 응답 본문은 출력하지 않는다(`-o /dev/null -w '%{http_code}'`). 본문이 필요한 Telegram은 `jq '.ok, .result.username'`처럼 판정 필드만 뽑는다.
 
 | 서비스 | 프로브 | 생존 판정 |
 |---|---|---|
-| Gemini/Google AI | GET `generativelanguage.googleapis.com/v1beta/models?key=K` | 200 |
+| Gemini/Google AI | GET `generativelanguage.googleapis.com/v1beta/models` + 헤더 `x-goog-api-key` (쿼리 `?key=` 금지) | 200 |
 | OpenAI | GET `api.openai.com/v1/models` + Bearer | 200 |
 | Anthropic | GET `api.anthropic.com/v1/models` + `x-api-key` + `anthropic-version: 2023-06-01` (프록시 우회 필수) | 200 |
 | OpenRouter | GET `openrouter.ai/api/v1/auth/key` + Bearer | 200 |
 | Perplexity | POST `api.perplexity.ai/chat/completions` + Bearer, 빈 바디 `{}` | 400 (401=사망) |
-| Telegram 봇 | GET `api.telegram.org/bot<K>/getMe` | `"ok":true` + 봇 이름 |
+| Telegram 봇 | GET `api.telegram.org/bot<K>/getMe` (키가 URL 경로 — `url =` 줄을 stdin 설정으로) | `"ok":true` + 봇 이름 |
 | data.go.kr (KMA/TOUR 등) | KMA getUltraSrtNcst에 serviceKey — **원본과 URL인코딩 양쪽 시도** | resultCode 00/10 (SERVICE_KEY_IS_NOT_REGISTERED=인코딩 재시도 후 판정) |
 | DashScope/QwenCloud | 계약된 엔드포인트로 max_tokens=1 (예: `token-plan.*.maas.aliyuncs.com/apps/anthropic/v1/messages`) | 200/400; 403 Unpurchased=키 유효·플랜 없음 |
 | 로컬/자체 프록시 | `/health` 200 + 인증 필요한 경로 1개 200 | 둘 다 |

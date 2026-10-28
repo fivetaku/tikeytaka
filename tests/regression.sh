@@ -240,6 +240,31 @@ set +m
 check "중단된 set은 볼트를 바꾸지 않음" '! bash "$TKT" get leak-sig >/dev/null 2>&1'
 export HOME="$HOME_REAL"
 
+echo "# 15. verify 레시피 패턴 — 키가 ps(argv)에 안 보임 (skills/verify)"
+CAN="CANARY-VERIFY-$$"
+pscap() { local i=0; while [ "$i" -lt 15 ]; do ps -axo command= 2>/dev/null; sleep 0.1; i=$((i+1)); done; }
+# 대조군: -H 로 직접 넘기면 ps 에 보여야 한다(표본 수집이 실제로 동작하는지 확인)
+curl -s -m 3 --noproxy "*" -o /dev/null -H "Authorization: Bearer $CAN-H" http://10.255.255.1/x & CP=$!
+pscap > "$WORK/ps.ctl"; wait "$CP" 2>/dev/null
+check "대조군: -H 직접 전달은 ps 에 노출됨(표본 수집 동작)" 'grep -q "$CAN-H" "$WORK/ps.ctl"'
+printf 'url = "http://10.255.255.1/x"\nheader = "Authorization: Bearer %s"\n' "$CAN" | curl -s -m 3 --noproxy "*" -o /dev/null --config - & CP=$!
+pscap > "$WORK/ps.cfg"; wait "$CP" 2>/dev/null
+check "레시피: printf | curl --config - 는 ps 에 키 미노출" '! grep -q "$CAN" "$WORK/ps.cfg"'
+check "레시피 문서에 쿼리 키(?key=) 프로브 없음" '! grep -q "?key=K" "$(dirname "$TKT")/../skills/verify/SKILL.md"'
+
+echo "# 16. doctor 위생 블록 — 평문 잔여물·위험 설정 보고(읽기 전용)"
+export HOME="$WORK/home14"
+: > "$TMPDIR/tkt.fake1"
+DOC_OUT="$(bash "$TKT" doctor 2>&1)"; DOC_RC=$?
+check "잔여 tkt.* 파일이 있으면 WARN + 처방" 'echo "$DOC_OUT" | grep -q "WARN \$TMPDIR 에 이전 버전이 남긴 tkt.\* 파일 1개"'
+check "위생 WARN 은 doctor 종료 코드에 반영 안 됨(볼트 정상 → exit 0)" '[ "$DOC_RC" = "0" ]'
+check "doctor 는 잔여물을 지우지 않음" '[ -f "$TMPDIR/tkt.fake1" ]'
+mv "$TMPDIR/tkt.fake1" "$WORK/fake1.off"
+check "잔여물이 없으면 ok" 'bash "$TKT" doctor 2>/dev/null | grep -q "ok   \$TMPDIR 잔여 tkt.\* 없음"'
+mkdir -p "$HOME/.config/tikeytaka"; printf 'FAKE_TOKEN=x\n' > "$HOME/.config/tikeytaka/shell.env"
+check "shell.env 에 비밀이 있으면 WARN" 'bash "$TKT" doctor 2>/dev/null | grep -q "WARN shell.env 의 비밀 1개"'
+export HOME="$HOME_REAL"
+
 # 테스트 볼트들의 미러 정리 (경로 해시별 파일 — 실사용 미러는 경로가 달라 건드리지 않음)
 for d in "$WORK/vault" "$WORK/vault2" "$WORK/vault3" "$WORK/vault4" "$FAKEHOME/.tikeytaka"; do
   h="$(printf '%s' "$d/secrets.enc" | shasum -a 256 | cut -c1-16)"; rm -f "$HOME/.config/tikeytaka/mirror/$h.enc"
