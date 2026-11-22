@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 — 2026-11-22
+- On 401, re-check header and endpoint first
+- Delete a key only after user approval
+
 ## 0.7.0 — 2026-10-28
 - **Security fix: decrypted vault copies no longer left in `$TMPDIR` (#2, PR #4).** Up to 0.6.3, `mktmp()` registered temp files inside a `$(...)` subshell, so the parent's cleanup list was always empty and every `get`/`list`/`sync`/`set` left a plaintext copy of the whole vault behind — even on a clean exit (one real machine had 186 such files). Every run now works in a private 0700 folder removed on exit; temp files that must live elsewhere (ciphertext in the vault folder, the `.env` rewrite file) are registered in a file inside it, which survives subshells (the reporter's proposed fix). HUP/INT/TERM now also trigger cleanup. Thanks to @jun10920 for the report, reproduction and fix. **After updating, run `tkt doctor` — files left by older versions are not removed automatically.**
 - **`tkt doctor` hygiene block**: reports leftover `tkt.*` files in `$TMPDIR` and the vault folder, group/world-readable `map.tsv` and synced `.env` files, secrets exported globally through `shell.env`, npm `ignore-scripts`, and pnpm `minimum-release-age`, each with a copy-paste fix. Read-only; warnings do not change the exit code.
