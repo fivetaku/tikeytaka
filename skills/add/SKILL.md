@@ -7,6 +7,8 @@ description: 새 API 키를 채팅에 노출하지 않고 중앙 볼트에 등�
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ## 원칙
 **키 값은 절대 채팅창에 받지 않는다.** 이미 붙여넣어졌다면 유출로 간주하고 재발급을 권고한 뒤, 재발급 키로 아래 절차를 진행한다.
 

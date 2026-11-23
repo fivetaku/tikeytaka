@@ -7,6 +7,8 @@ description: 플러그인이 선언한 필요 API 키를 볼트와 대조해 미
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ```bash
 tkt requires                      # 설치된 마켓/캐시 플러그인 전체 스캔
 tkt requires <플러그인경로> ...    # 특정 경로만

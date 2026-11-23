@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.0 — 2026-11-23
+- Runs on Codex too with the same skills (Codex에서도 같은 스킬로 동작). The `/tikeytaka` router procedure moved from the command into `skills/tikeytaka/SKILL.md`; the command is now a thin wrapper (first-run setup + hand-off). Every skill carries a one-line note for reading `${CLAUDE_PLUGIN_ROOT}` on Codex. The first-run setup script does nothing on Codex.
+
 ## 0.7.1 — 2026-11-22
 - On 401, re-check header and endpoint first
 - Delete a key only after user approval

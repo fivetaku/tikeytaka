@@ -7,6 +7,8 @@ description: 기존 프로젝트들의 .env 파일을 탐색해 API 키를 중�
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ## 절차
 
 1. **탐색**: 홈 디렉토리에서 `.env`/`.env.local` 파일을 찾는다. `node_modules`, `Library`, `.Trash`, 백업/Downloads류는 제외한다.

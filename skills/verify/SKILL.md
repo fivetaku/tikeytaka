@@ -7,6 +7,8 @@ description: API 키의 생사를 등록 전·후에 실호출로 검증한다. 
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ## 원칙
 
 1. **등록 전 검증 필수**: 죽은 키는 볼트에 들어가면 안 된다. add/scan은 이 절차를 통과한 값만 `set-stdin` 한다.
