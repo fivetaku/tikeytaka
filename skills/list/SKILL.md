@@ -7,6 +7,8 @@ description: 중앙 볼트에서 관리 중인 API 키 서비스 목록과 프�
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ```bash
 tkt list        # 볼트의 서비스명 목록 (값은 안 나옴)
 tkt map-list    # 어떤 프로젝트의 어떤 변수가 어느 서비스에 연결됐는지

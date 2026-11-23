@@ -22,6 +22,8 @@ Central API key vault plugin — consolidate keys scattered across `.env` files 
 /plugin install tikeytaka
 ```
 
+Codex: `codex plugin marketplace add fivetaku/gptaku_plugins`, then `codex plugin add tikeytaka@gptaku-plugins`.
+
 ### 3. Restart Claude Code
 
 (New commands only register after a restart.)

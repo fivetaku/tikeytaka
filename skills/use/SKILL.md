@@ -7,6 +7,8 @@ description: API 키가 필요한 작업을 시작할 때 사용자에게 묻기
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ## 원칙
 
 **이미 볼트에 있는 키를 사용자에게 다시 묻는 것은 실패다.** 키가 필요해지는 순간의 순서는 항상: 볼트 조회 → 있으면 연결 → 없을 때만 사용자에게.

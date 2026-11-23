@@ -7,6 +7,8 @@ description: 중앙 볼트의 키를 연결된 모든 프로젝트 .env에 전�
 
 코어 CLI: `bash "${CLAUDE_PLUGIN_ROOT}/bin/tkt"` (이하 `tkt`)
 
+Codex에서는 `${CLAUDE_PLUGIN_ROOT}`를 이 플러그인 루트(이 SKILL.md에서 두 단계 위 폴더)로 바꿔 읽는다.
+
 ```bash
 tkt sync --check   # 1) 드라이런: 무엇이 바뀔지 먼저 확인
 tkt sync           # 2) 실제 전파
